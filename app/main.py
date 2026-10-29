@@ -6,6 +6,8 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 
 from app.api.health import router as health_router
+from app.api.items import router as items_router
+from app.api.session import router as session_router
 from app.config import Settings
 from app.db import create_engine, pgvector_supported, pgvector_version
 from app.errors import register_error_handlers
@@ -58,6 +60,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_error_handlers(app)
     app.add_middleware(SessionMiddleware)
     app.include_router(health_router)
+    app.include_router(items_router)
+    app.include_router(session_router)
     return app
 
 
