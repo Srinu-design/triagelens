@@ -1,0 +1,69 @@
+[project]
+name = "triagelens"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.162.*",
+    "uvicorn[standard]==0.54.*",
+    "sqlalchemy[asyncio]==2.1.*",
+    "asyncpg==0.32.*",
+    "alembic==1.20.*",
+    "pgvector==0.5.1",
+    "fastembed==0.9.1",
+    "numpy",
+    "httpx==0.28.*",
+    "pydantic==2.14.*",
+    "pydantic-settings==2.16.*",
+    "redis==8.1.*",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.*",
+    "pytest-asyncio==1.4.*",
+    "hypothesis==6.170.*",
+    "ruff==0.17.*",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Spec reference code and literals are copied verbatim (SPEC §3, §5, §7, §8, §9, §12).
+"app/domain/pii.py" = ["E501"]
+"app/domain/decision.py" = ["E501"]
+"app/domain/rules.py" = ["E501"]
+"app/seed_data.py" = ["E501"]
+"eval/labeled_set.py" = ["E501", "I001"]
+"eval/code_cases.py" = ["E501"]
+"migrations/versions/*.py" = ["E501"]
+"app/services/search.py" = ["E501"]
+
+[tool.ruff.format]
+# Keep the verbatim reference code exactly as the spec prints it.
+exclude = [
+    "app/domain/pii.py",
+    "app/domain/codes.py",
+    "app/domain/decision.py",
+    "app/domain/rules.py",
+    "app/seed_data.py",
+    "eval/labeled_set.py",
+    "eval/code_cases.py",
+    "docs/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+markers = [
+    "integration: needs the local PostgreSQL + pgvector service and the real model",
+]
