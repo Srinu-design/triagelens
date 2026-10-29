@@ -589,11 +589,11 @@
       <form class="triage-form" id="triage-form">
         <div class="form-field full">
           <label class="form-label" for="triage-title">Ticket Title</label>
-          <input type="text" id="triage-title" class="form-input" placeholder="e.g. Night mode for checkout on Android" required>
+          <input type="text" id="triage-title" class="form-input" placeholder="e.g. Night mode for checkout on Android" minlength="3" required>
         </div>
         <div class="form-field full">
           <label class="form-label" for="triage-desc">Ticket Description</label>
-          <textarea id="triage-desc" class="form-textarea" placeholder="Detailed issue description with optional error logs..." required></textarea>
+          <textarea id="triage-desc" class="form-textarea" placeholder="Detailed issue description with optional error logs..."></textarea>
         </div>
         <div class="form-field">
           <label class="form-label" for="triage-error-code">Error Code (Optional)</label>
@@ -668,7 +668,7 @@
         </div>
       </div>
       <p class="muted">Calibrated duplicate detection report against the 31-ticket labeled set.</p>
-      <div id="model-card-content" class="table-wrap">
+      <div id="model-card-content" class="model-card-content">
         <p class="muted" id="model-card-status">Loading calibration report&hellip;</p>
       </div>
     </div>

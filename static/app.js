@@ -62,11 +62,11 @@
       const res = await fetch(BASE + 'readyz');
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        pill.dataset.state = 'ok';
-        textEl.textContent = data.status === 'ok' ? 'Ready' : 'Degraded';
+        pill.dataset.state = data.redis === 'ok' ? 'ok' : 'degraded';
+        textEl.textContent = data.redis === 'ok' ? 'Ready' : 'Degraded';
       } else {
         pill.dataset.state = 'degraded';
-        textEl.textContent = 'Degraded';
+        textEl.textContent = res.status === 503 ? 'Warming up' : 'Degraded';
       }
     } catch (_) {
       pill.dataset.state = 'down';
@@ -292,15 +292,12 @@
 
     if (planEl) {
       if (telem.plan) {
-        const parts = [];
-        if (telem.plan.uses_hnsw) parts.push('HNSW');
-        if (telem.plan.uses_gin) parts.push('GIN');
-        if (telem.plan.node_types && telem.plan.node_types.length > 0) {
-          parts.push(telem.plan.node_types.slice(0, 3).join(', '));
-        }
-        planEl.textContent = parts.join(' · ') || 'Seq Scan';
+        planEl.textContent = telem.plan.uses_hnsw ? 'Index Scan · intake_hnsw' : 'Seq Scan';
+        if (telem.plan.uses_gin) planEl.textContent += ' · GIN intake_tsv_gin';
+        planEl.title = (telem.plan.node_types || []).join(', ');
       } else {
         planEl.textContent = 'Seq Scan';
+        planEl.title = '';
       }
     }
 
@@ -620,8 +617,8 @@
     const errorCode = triageErrorCodeInput.value.trim() || null;
     const categoryOverride = triageCategorySelect.value || null;
 
-    if (!title || !description) {
-      showToast('Missing Fields', 'Title and description are required for preview.', true);
+    if (title.length < 3) {
+      showToast('Invalid Title', 'A title of at least 3 characters is required for preview.', true);
       return;
     }
 
@@ -712,7 +709,7 @@
   if (triageCategorySelect) {
     triageCategorySelect.addEventListener('change', () => {
       // Re-run preview with user category override if form is filled
-      if (triageTitleInput.value.trim() && triageDescInput.value.trim()) {
+      if (triageTitleInput.value.trim().length >= 3) {
         executePreview();
       }
     });
@@ -798,10 +795,63 @@
       );
 
       const top1 = data.top1 || {};
-      addRow('Top-1 Accuracy', `${top1.correct ?? 23} / ${top1.total ?? 23}`, '100% candidate recall');
+      addRow('Top-1 accuracy (in-sample)', `${top1.correct ?? 23} / ${top1.total ?? 23}`, 'Correctly ranked labeled duplicates');
 
       table.appendChild(tbody);
-      content.appendChild(table);
+      const summaryWrap = document.createElement('div');
+      summaryWrap.className = 'table-wrap';
+      summaryWrap.appendChild(table);
+      content.appendChild(summaryWrap);
+
+      function appendReportTable(captionText, headers, rows, className) {
+        const wrap = document.createElement('div');
+        wrap.className = 'table-wrap';
+        wrap.tabIndex = 0;
+        wrap.setAttribute('role', 'region');
+        wrap.setAttribute('aria-label', captionText);
+        const reportTable = document.createElement('table');
+        reportTable.className = 'data-table ' + className;
+        const caption = document.createElement('caption');
+        caption.textContent = captionText;
+        reportTable.appendChild(caption);
+        const head = document.createElement('thead');
+        const heading = document.createElement('tr');
+        headers.forEach(label => {
+          const cell = document.createElement('th');
+          cell.scope = 'col';
+          cell.textContent = label;
+          heading.appendChild(cell);
+        });
+        head.appendChild(heading);
+        reportTable.appendChild(head);
+        const body = document.createElement('tbody');
+        rows.forEach(values => {
+          const row = document.createElement('tr');
+          values.forEach(value => {
+            const cell = document.createElement('td');
+            cell.textContent = String(value);
+            row.appendChild(cell);
+          });
+          body.appendChild(row);
+        });
+        reportTable.appendChild(body);
+        wrap.appendChild(reportTable);
+        content.appendChild(wrap);
+      }
+
+      appendReportTable('Threshold grid (in-sample)',
+        ['Auto ≥', 'Review ≥', 'Auto-correct', 'Auto-wrong', 'Review', 'Missed'],
+        (data.grid || []).map(row => [
+          String(row.t_auto) + (row.t_auto === tAuto && row.t_review === tReview ? ' configured' : ''),
+          row.t_review, row.auto_correct, row.auto_wrong, row.review, row.missed,
+        ]), 'model-grid');
+      appendReportTable('Code cases (in-sample)',
+        ['Title', 'Truth', 'Closest (cosine)', 'Verdict', 'Expected verdict', 'Pass'],
+        (data.code_cases || []).map(row => [
+          row.title, row.truth,
+          row.closest + ' (' + Number(row.cosine).toFixed(3) + ')',
+          row.verdict, row.expected_verdict, row.pass ? 'pass' : 'FAIL',
+        ]), 'model-code-cases');
     } catch (_) {
       while (content.firstChild) {
         content.removeChild(content.firstChild);

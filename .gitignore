@@ -5,3 +5,5 @@ __pycache__/
 .hypothesis/
 .env
 .models/
+bench/build.json
+bench/RESULTS.md
