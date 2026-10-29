@@ -62,13 +62,50 @@ class LLMClassifier:
         res = rules.classify(clean_title, clean_desc)
         return TriageSuggestion(**res), "rules"
 
+    async def _attempt_completion(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        is_retry: bool,
+    ) -> tuple[TriageSuggestion | None, str, Exception | None]:
+        req_label = "LLM retry request" if is_retry else "LLM request"
+        resp_label = "LLM retry response" if is_retry else "LLM response"
+        parse_label = "retry" if is_retry else "first attempt"
+
+        try:
+            resp = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
+        except (httpx.TimeoutException, httpx.HTTPError) as exc:
+            logger.warning("%s failed (reason=%s)", req_label, type(exc).__name__)
+            return None, "", exc
+
+        if not resp.is_success:
+            logger.warning("%s not 2xx (status=%d)", resp_label, resp.status_code)
+            return None, "", RuntimeError(f"HTTP {resp.status_code}")
+
+        content = ""
+        try:
+            resp_json = resp.json()
+            content = resp_json["choices"][0]["message"]["content"] or ""
+            parsed = json.loads(content)
+            suggestion = TriageSuggestion.model_validate(parsed)
+            return suggestion, content, None
+        except Exception as exc:
+            logger.warning(
+                "LLM response parsing/validation failed on %s (error=%s)",
+                parse_label,
+                type(exc).__name__,
+            )
+            return None, content, exc
+
     async def suggest(
-        self, title: str, description: str
+        self, title: str, description: str, *, allow_llm: bool = True
     ) -> tuple[TriageSuggestion, Literal["llm", "rules"]]:
         clean_title, _ = pii.scrub(title)
         clean_desc, _ = pii.scrub(description)
 
-        if not self.enabled:
+        if not self.enabled or not allow_llm:
             return self._fallback_rules(clean_title, clean_desc)
 
         client = self.http
@@ -111,30 +148,17 @@ class LLMClassifier:
             if not await self._consume_budget():
                 return self._fallback_rules(clean_title, clean_desc)
 
-            try:
-                resp = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
-            except (httpx.TimeoutException, httpx.HTTPError) as exc:
-                logger.warning("LLM request failed (reason=%s)", type(exc).__name__)
+            sugg, content, val_error = await self._attempt_completion(
+                client, url, headers, payload, is_retry=False
+            )
+            if sugg is not None:
+                return sugg, "llm"
+            if (
+                not content
+                or val_error is None
+                or isinstance(val_error, (httpx.TimeoutException, httpx.HTTPError, RuntimeError))
+            ):
                 return self._fallback_rules(clean_title, clean_desc)
-
-            if not resp.is_success:
-                logger.warning("LLM response not 2xx (status=%d)", resp.status_code)
-                return self._fallback_rules(clean_title, clean_desc)
-
-            content = ""
-            val_error: Exception | None = None
-            try:
-                resp_json = resp.json()
-                content = resp_json["choices"][0]["message"]["content"] or ""
-                parsed = json.loads(content)
-                suggestion = TriageSuggestion.model_validate(parsed)
-                return suggestion, "llm"
-            except Exception as exc:
-                val_error = exc
-                logger.warning(
-                    "LLM response parsing/validation failed on first attempt (error=%s)",
-                    type(exc).__name__,
-                )
 
             # Retry once on parsing/validation failure
             if not await self._consume_budget():
@@ -152,28 +176,12 @@ class LLMClassifier:
             )
             payload["messages"] = messages
 
-            try:
-                resp2 = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
-            except (httpx.TimeoutException, httpx.HTTPError) as exc:
-                logger.warning("LLM retry request failed (reason=%s)", type(exc).__name__)
-                return self._fallback_rules(clean_title, clean_desc)
-
-            if not resp2.is_success:
-                logger.warning("LLM retry response not 2xx (status=%d)", resp2.status_code)
-                return self._fallback_rules(clean_title, clean_desc)
-
-            try:
-                resp_json2 = resp2.json()
-                content2 = resp_json2["choices"][0]["message"]["content"] or ""
-                parsed2 = json.loads(content2)
-                suggestion2 = TriageSuggestion.model_validate(parsed2)
-                return suggestion2, "llm"
-            except Exception as exc:
-                logger.warning(
-                    "LLM response parsing/validation failed on retry (error=%s)",
-                    type(exc).__name__,
-                )
-                return self._fallback_rules(clean_title, clean_desc)
+            sugg2, _, _ = await self._attempt_completion(
+                client, url, headers, payload, is_retry=True
+            )
+            if sugg2 is not None:
+                return sugg2, "llm"
+            return self._fallback_rules(clean_title, clean_desc)
 
         finally:
             if client_to_close is not None:

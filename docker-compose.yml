@@ -26,6 +26,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  app:
+    profiles: ["app"]
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:dev@postgres:5432/triagelens
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: prod
+      EMBED_THREADS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${TL_DOCKER_PORT:-8410}:8000"
 volumes:
   postgres_data:
   redis_data:

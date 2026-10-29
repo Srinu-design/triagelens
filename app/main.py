@@ -19,6 +19,13 @@ from app.api.triage import router as triage_router
 from app.config import Settings
 from app.db import create_engine, pgvector_supported, pgvector_version
 from app.errors import register_error_handlers
+from app.logs import setup_logging
+from app.middleware import (
+    BodyLimitMiddleware,
+    RequestLogMiddleware,
+    SecurityHeadersMiddleware,
+)
+from app.services.cleanup import cleanup_idle_sessions
 from app.services.embeddings import make_embedder
 from app.services.llm import LLMClassifier
 from app.session import SessionMiddleware
@@ -28,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings()
+    setup_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -39,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.http = http
         app.state.model_ready = False
         warmup = None
+        cleanup_task = None
         try:
             version = await pgvector_version(engine)
             if not pgvector_supported(version):
@@ -63,10 +72,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else:
                     app.state.model_ready = True
 
+            async def session_cleanup_loop():
+                while True:
+                    try:
+                        await asyncio.sleep(1800)
+                        count = await cleanup_idle_sessions(engine, settings.session_ttl_hours)
+                        if count:
+                            logger.info("Cleaned up %d idle sessions", count)
+                    except asyncio.CancelledError:
+                        break
+                    except Exception:
+                        logger.exception("Session cleanup failed")
+
             warmup = asyncio.create_task(warm_model())
+            cleanup_task = asyncio.create_task(session_cleanup_loop())
             app.state.warmup_task = warmup
+            app.state.cleanup_task = cleanup_task
             yield
         finally:
+            if cleanup_task is not None:
+                cleanup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await cleanup_task
             if warmup is not None:
                 warmup.cancel()
                 with suppress(asyncio.CancelledError):
@@ -79,7 +106,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.state.settings = settings
     register_error_handlers(app)
+    # DECISION: Order of middleware: RequestLogMiddleware outermost
+    # (so 413s and 429s are logged too), then SecurityHeadersMiddleware,
+    # then BodyLimitMiddleware, then the existing SessionMiddleware.
     app.add_middleware(SessionMiddleware)
+    app.add_middleware(BodyLimitMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestLogMiddleware)
     app.mount(
         "/static",
         StaticFiles(directory=Path(__file__).resolve().parent.parent / "static"),

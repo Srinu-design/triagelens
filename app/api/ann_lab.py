@@ -4,13 +4,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.errors import ApiError
+from app.limits import limit_ann_lab
 from app.services.search import CategoryFilter, ann_lab
 from app.session import current_session_id
 
 router = APIRouter()
 
 
-@router.get("/api/ann-lab")
+@router.get("/api/ann-lab", dependencies=[Depends(limit_ann_lab)])
 async def ann_lab_endpoint(
     request: Request,
     session_id: Annotated[UUID, Depends(current_session_id)],
