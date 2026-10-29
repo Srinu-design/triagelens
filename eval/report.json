@@ -1,0 +1,130 @@
+{
+  "model": "BAAI/bge-small-en-v1.5",
+  "generated_at": "2026-10-29T14:26:20.977877+00:00",
+  "in_sample": true,
+  "labeled_set": {
+    "tickets": 31,
+    "duplicates": 23,
+    "new": 8
+  },
+  "thresholds": {
+    "t_auto": 0.8,
+    "t_review": 0.7
+  },
+  "configured": {
+    "auto_correct": 21,
+    "auto_wrong": 0,
+    "review": 4,
+    "missed": 0
+  },
+  "grid": [
+    {
+      "t_auto": 0.8,
+      "t_review": 0.7,
+      "auto_correct": 21,
+      "auto_wrong": 0,
+      "review": 4,
+      "missed": 0
+    },
+    {
+      "t_auto": 0.78,
+      "t_review": 0.7,
+      "auto_correct": 21,
+      "auto_wrong": 0,
+      "review": 4,
+      "missed": 0
+    },
+    {
+      "t_auto": 0.75,
+      "t_review": 0.7,
+      "auto_correct": 23,
+      "auto_wrong": 1,
+      "review": 1,
+      "missed": 0
+    },
+    {
+      "t_auto": 0.735,
+      "t_review": 0.735,
+      "auto_correct": 23,
+      "auto_wrong": 1,
+      "review": 0,
+      "missed": 0
+    }
+  ],
+  "margin": {
+    "closest_lookalike": {
+      "title": "Dark mode for the web dashboard",
+      "cosine": 0.7542
+    },
+    "weakest_duplicate": {
+      "title": "Profile picture upload hangs on my phone",
+      "cosine": 0.7549
+    }
+  },
+  "top1": {
+    "correct": 23,
+    "total": 23
+  },
+  "code_cases": [
+    {
+      "title": "Safari keeps logging us out with E_0X7F3A",
+      "truth": "BUG-109",
+      "closest": "BUG-109",
+      "cosine": 0.8314,
+      "verdict": "DUPLICATE",
+      "expected_verdict": "DUPLICATE",
+      "expected_master": "BUG-109",
+      "pass": true
+    },
+    {
+      "title": "Checkout fails at peak with ERR_PG_POOL_TIMEOUT_504",
+      "truth": "BUG-101",
+      "closest": "BUG-101",
+      "cosine": 0.867,
+      "verdict": "DUPLICATE",
+      "expected_verdict": "DUPLICATE",
+      "expected_master": "BUG-101",
+      "pass": true
+    },
+    {
+      "title": "Password reset mail bounced with SMTP_RELAY_421",
+      "truth": "BUG-103",
+      "closest": "BUG-103",
+      "cosine": 0.8719,
+      "verdict": "DUPLICATE",
+      "expected_verdict": "DUPLICATE",
+      "expected_master": "BUG-103",
+      "pass": true
+    },
+    {
+      "title": "Profile photo upload rejected with PAYLOAD_TOO_LARGE_413",
+      "truth": "a different bug",
+      "closest": "BUG-112",
+      "cosine": 0.797,
+      "verdict": "REVIEW",
+      "expected_verdict": "REVIEW",
+      "expected_master": "BUG-112",
+      "pass": true
+    },
+    {
+      "title": "Login times out with ERR_PG_POOL_TIMEOUT_504",
+      "truth": "a different bug",
+      "closest": "BUG-101",
+      "cosine": 0.7644,
+      "verdict": "REVIEW",
+      "expected_verdict": "REVIEW",
+      "expected_master": "BUG-101",
+      "pass": true
+    },
+    {
+      "title": "Report download fails with E_0X7F3A",
+      "truth": "a different bug",
+      "closest": "BUG-109",
+      "cosine": 0.5372,
+      "verdict": "REVIEW",
+      "expected_verdict": "REVIEW",
+      "expected_master": "BUG-109",
+      "pass": true
+    }
+  ]
+}

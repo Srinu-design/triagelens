@@ -74,3 +74,17 @@ class SessionResetOut(BaseModel):
 
     deleted_items: int
     deleted_votes: int
+
+
+class PreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=3, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    error_code: str | None = Field(default=None, max_length=64)
+    category_override: Literal["BUG_REPORT", "FEATURE_REQUEST", "CLIENT_ENQUIRY"] | None = None
+
+    @field_validator("error_code", mode="before")
+    @classmethod
+    def validate_error_code(cls, value: Any) -> str | None:
+        return ItemIn.validate_error_code(value)
