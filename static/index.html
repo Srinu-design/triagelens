@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TriageLens · Hybrid-Search Ticket Triage</title>
+  <meta name="description" content="TriageLens scrubs personal data, suggests categories, finds duplicates with one hybrid PostgreSQL query, and acts deterministically.">
+  <meta property="og:title" content="TriageLens · Hybrid-Search Ticket Triage">
+  <meta property="og:description" content="Explore hybrid PostgreSQL full-text and pgvector HNSW search, calibrated duplicate detection, and PII scrubbing.">
+  <meta name="color-scheme" content="light dark">
+  <script src="./static/theme.js"></script>
+  <link rel="icon" href="./static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./static/styles.css">
+  <script src="./static/app.js" defer></script>
+</head>
+<body id="landing-page">
+<a class="skip-link" href="#main">Skip to content</a>
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+<header class="nav-shell">
+  <nav class="portfolio-nav" aria-label="Portfolio">
+    <div class="nav-start">
+      <a class="nav-mark" href="http://3.104.222.203/" aria-label="Portfolio home">V</a>
+      <div class="nav-links">
+        <a href="http://3.104.222.203/#projects">Projects</a>
+        <a href="http://3.104.222.203/splitsync/">SplitSync</a>
+        <a href="./" aria-current="page">TriageLens</a>
+        <a href="http://3.104.222.203/grafana/">Dashboard</a>
+      </div>
+    </div>
+    <a class="nav-github" href="https://github.com/Srinu-design/triagelens">GitHub</a>
+  </nav>
+</header>
+
+<div class="project-bar container">
+  <span class="status-pill" id="site-status" data-state="unknown" title="Live readiness from this server">
+    <span class="status-dot" aria-hidden="true"></span>
+    <span id="site-status-text">Checking</span>
+  </span>
+  <nav class="project-tabs" aria-label="TriageLens sections">
+    <a href="#about" data-tab-link="about" aria-current="page">About</a>
+    <a href="#how-it-works" data-tab-link="how-it-works">How it works</a>
+    <a href="#try" data-tab-link="try">Try it</a>
+  </nav>
+  <button type="button" class="theme-toggle" id="theme-toggle" data-theme-toggle aria-label="Toggle color theme" title="Toggle color theme">
+    <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>
+    <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>
+  </button>
+</div>
+
+<main id="main" tabindex="-1">
+<!-- ABOUT TAB -->
+<section id="about" class="tab-panel" data-tab="about" aria-label="About TriageLens">
+  <div class="hero container">
+    <div class="hero-copy">
+      <p class="eyebrow">PROJECT 4 · HYBRID-SEARCH TRIAGE</p>
+      <h1 class="hero-title">TriageLens</h1>
+      <p class="hero-lead">Hybrid-search intake triage with calibrated duplicate detection and PII scrubbing.</p>
+      <blockquote class="pitch-quote">
+        &ldquo;Support teams drown in duplicates written in different words. Keyword search misses paraphrases, and vector search misses opaque error codes.
+        <br><br>
+        TriageLens runs both in one PostgreSQL query &mdash; full-text and pgvector HNSW, fused with Reciprocal Rank Fusion &mdash; scoped to the right category. The duplicate decision uses calibrated similarity thresholds, so it auto-merges only when it's sure and sends the grey zone to a human. Emails, phone numbers, UPI IDs, Aadhaar and API keys are scrubbed before any text reaches an LLM.&rdquo;
+      </blockquote>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#try">Try it</a>
+        <a class="btn btn-secondary" href="#how-it-works">How it works</a>
+      </div>
+      <p class="muted">Deterministic search, calibrated decisions, and sandbox isolation. Not a RAG chatbot.</p>
+    </div>
+    <div class="hero-card">
+      <div class="hero-card-heading">
+        <p class="eyebrow">VERIFIED PERFORMANCE</p>
+        <h2>Measured on PostgreSQL 16 &amp; fastembed</h2>
+      </div>
+      <dl class="hero-stats">
+        <div class="hero-stat">
+          <dt class="mono">21 / 23</dt>
+          <dd>Auto-merged in-sample (0 wrong merges, 4 review, 0 missed)</dd>
+        </div>
+        <div class="hero-stat">
+          <dt class="mono">0.754 vs 0.755</dt>
+          <dd>In-sample margin: closest lookalike vs weakest duplicate</dd>
+        </div>
+        <div class="hero-stat">
+          <dt class="mono">26&ndash;166 ms</dt>
+          <dd>Hybrid search at 100k rows with GIN prefilter (vs 500&ndash;840 ms scan)</dd>
+        </div>
+        <div class="hero-stat">
+          <dt class="mono">0.80 / 0.70</dt>
+          <dd>Calibrated thresholds: auto-merge &ge; 0.80, review 0.70&ndash;0.80</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <nav class="section-chips" aria-label="About sections">
+    <div class="container chips-row">
+      <a href="#features">Features</a>
+      <a href="#the-problem">The problem</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#decisions">Design decisions</a>
+      <a href="#measured">Already measured</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- FEATURES -->
+    <section class="content-section" id="features" aria-labelledby="features-title">
+      <p class="eyebrow">Core Capabilities</p>
+      <h2 class="section-heading" id="features-title">One SQL query. Two retrievers. Safe intake.</h2>
+      <p class="section-intro">TriageLens combines PostgreSQL's full-text search with pgvector 0.8 HNSW, fusing rankings with RRF and deciding with calibrated thresholds.</p>
+      <div class="feature-grid">
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </span>
+          <h3>One query, two retrievers</h3>
+          <p>A lexical GIN CTE and a semantic HNSW CTE fused via Reciprocal Rank Fusion (k=60) in a single SQL round trip.</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </span>
+          <h3>Privacy-first PII scrubber</h3>
+          <p>14 ordered regex rules with Luhn and Verhoeff checksums redact secrets, cards, Aadhaar, UPI, and phones before storage or LLMs.</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          </span>
+          <h3>Pinned error codes</h3>
+          <p>Opaque identifiers like <code>E_0X7F3A</code> are invisible to embeddings (rank #16). Exact matches are pinned directly to #1.</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </span>
+          <h3>Calibrated duplicate decisions</h3>
+          <p>RRF ranks candidates, but cosine thresholds decide: &ge; 0.80 auto-merge, 0.70&ndash;0.80 human review, &lt; 0.70 new ticket.</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          </span>
+          <h3>Category isolation</h3>
+          <p>Search is scoped by category to prevent cross-category collisions (a crash bug never auto-merges into a feature request).</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </span>
+          <h3>Iterative ANN scan</h3>
+          <p>pgvector 0.8 <code>strict_order</code> continues walking the HNSW graph to avoid filter starvation caused by post-filtering.</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </span>
+          <h3>Local embeddings</h3>
+          <p>FastEmbed with <code>BAAI/bge-small-en-v1.5</code> (384 dimensions) runs in-process on CPU with no network calls at runtime.</p>
+        </article>
+        <article class="card feature-card">
+          <span class="icon-tile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+          <h3>Per-session sandbox</h3>
+          <p>Each visitor sees seed tickets plus their own created tickets and votes. Demo data automatically cleans up after 24 hours.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- THE PROBLEM -->
+    <section class="content-section" id="the-problem" aria-labelledby="problem-title">
+      <p class="eyebrow">The Problems It Solves</p>
+      <h2 class="section-heading" id="problem-title">Seven failure modes. Seven measured fixes.</h2>
+      <p class="section-intro">Each failure mode was reproduced on the 30-ticket demo seed using PostgreSQL 16 and the real embedding model.</p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <caption class="sr-only">Seven failure modes and TriageLens measured fixes</caption>
+          <thead>
+            <tr>
+              <th scope="col">Problem</th>
+              <th scope="col">Why the naive approach fails</th>
+              <th scope="col">TriageLens's fix (measured)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Paraphrased duplicates</th>
+              <td>&ldquo;Mobile avatar upload screen hangs&rdquo; shares no words with &ldquo;Android image cropper freezes on profile photo&rdquo;</td>
+              <td>Semantic branch ranks it #1 (cosine 0.663)</td>
+            </tr>
+            <tr>
+              <th scope="row">Opaque identifiers</th>
+              <td>Embeddings blur codes: the ticket with <code>E_0X7F3A</code> sits #16 of 30 semantically</td>
+              <td>Exact error-code match pins it #1</td>
+            </tr>
+            <tr>
+              <th scope="row">Cross-category collisions</th>
+              <td>Unscoped, the dark-mode crash bug and the dark-mode feature request tie for #1</td>
+              <td>Category-scoped search returns each one #1 in its own category</td>
+            </tr>
+            <tr>
+              <th scope="row">Lexical noise</th>
+              <td>OR-matching ranks tickets sharing one word (&ldquo;screen&rdquo;, &ldquo;upload&rdquo;) above the real match</td>
+              <td>Minimum-should-match: a ticket must match half the query terms (capped at 4)</td>
+            </tr>
+            <tr>
+              <th scope="row">Deciding &ldquo;duplicate&rdquo;</th>
+              <td>RRF always has a #1, and its score isn't a probability</td>
+              <td>Cosine thresholds: auto-merge &ge; 0.80, human review 0.70&ndash;0.80, new &lt; 0.70</td>
+            </tr>
+            <tr>
+              <th scope="row">ANN post-filtering</th>
+              <td>HNSW with a category filter returned 1 of 5 requested rows in testing</td>
+              <td>pgvector &ge; 0.8 iterative scans keep searching until 5 match</td>
+            </tr>
+            <tr>
+              <th scope="row">PII leakage</th>
+              <td>Raw ticket text would go to an external LLM or logs</td>
+              <td>Ordered regex + checksum validators scrub before the LLM, embedding, storage, and logs</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE -->
+    <section class="content-section" id="architecture" aria-labelledby="arch-title">
+      <p class="eyebrow">Architecture</p>
+      <h2 class="section-heading" id="arch-title">Deterministic pipeline. Single SQL round trip.</h2>
+      <p class="section-intro">Everything left of the decision is deterministic and testable. The LLM only suggests the category, which the user confirms.</p>
+      <figure class="card">
+        <svg class="flow-diagram" viewBox="0 0 920 180" role="img" aria-labelledby="diag-title diag-desc">
+          <title id="diag-title">TriageLens Processing Pipeline</title>
+          <desc id="diag-desc">Raw ticket text is scrubbed for PII, categorized, embedded with FastEmbed, searched with hybrid PostgreSQL query, fused via RRF, decided with calibrated thresholds, and committed.</desc>
+          <g class="diagram-lines">
+            <path d="M120 70 h30 m100 0 h30 m100 0 h30 m100 0 h30 m100 0 h30 m100 0 h30"/>
+            <path d="m142 65 8 5-8 5 m130-10 8 5-8 5 m130-10 8 5-8 5 m130-10 8 5-8 5 m130-10 8 5-8 5 m130-10 8 5-8 5"/>
+          </g>
+          <g class="diagram-nodes">
+            <rect x="20" y="38" width="100" height="64" rx="8"/>
+            <rect x="150" y="38" width="100" height="64" rx="8"/>
+            <rect x="280" y="38" width="100" height="64" rx="8"/>
+            <rect x="410" y="38" width="100" height="64" rx="8"/>
+            <rect x="540" y="38" width="100" height="64" rx="8"/>
+            <rect x="670" y="38" width="100" height="64" rx="8"/>
+            <rect x="800" y="38" width="100" height="64" rx="8"/>
+          </g>
+          <g>
+            <text x="70" y="68">Raw Ticket</text>
+            <text x="70" y="86">Intake</text>
+            <text x="200" y="68">PII Scrubber</text>
+            <text x="200" y="86">14 rules</text>
+            <text x="330" y="68">Category</text>
+            <text x="330" y="86">LLM / Rules</text>
+            <text x="460" y="68">Hybrid SQL</text>
+            <text x="460" y="86">GIN + HNSW</text>
+            <text x="590" y="68">RRF Fusion</text>
+            <text x="590" y="86">k = 60</text>
+            <text x="720" y="68">Decision</text>
+            <text x="720" y="86">0.80 / 0.70</text>
+            <text x="850" y="68">Action</text>
+            <text x="850" y="86">Link/Vote/Ans</text>
+          </g>
+        </svg>
+      </figure>
+    </section>
+
+    <!-- DESIGN DECISIONS -->
+    <section class="content-section" id="decisions" aria-labelledby="decisions-title">
+      <p class="eyebrow">Design Decisions</p>
+      <h2 class="section-heading" id="decisions-title">Trade-offs you must defend.</h2>
+      <p class="section-intro">Eight core architectural choices behind the hybrid search, scoring, and data boundaries.</p>
+      <div class="decision-list">
+        <details class="decision-item">
+          <summary>1. One query, two retrievers.</summary>
+          <p>A lexical CTE (GIN index on generated tsvector: title and error code weighted A, description B) and a semantic CTE (HNSW on halfvec(384), cosine) are fused with RRF in a FULL OUTER JOIN. One round trip, one transaction, no second database to keep in sync.</p>
+        </details>
+        <details class="decision-item">
+          <summary>2. OR plus minimum-should-match.</summary>
+          <p>websearch_to_tsquery ANDs every word, so natural sentences match nothing; plain OR lets one shared word outrank the real match. TriageLens requires half the distinct query terms, capped at 4. On the paraphrase demo, OR-only pushed the true duplicate to #5; with the rule, it is #1. The term count runs only on rows the GIN index returns: written as one condition, it forced a scan of all 100,000 template tickets (500&ndash;840 ms); with a prefilter, 26&ndash;166 ms.</p>
+        </details>
+        <details class="decision-item">
+          <summary>3. Exact identifiers are pinned, not ranked.</summary>
+          <p>Error codes in the query (WORD_WORD_&hellip; pattern) are matched exactly against an indexed error_code column and pinned above fused results. An opaque code like E_0X7F3A is invisible to embeddings (rank 16 of 30).</p>
+        </details>
+        <details class="decision-item">
+          <summary>4. RRF (k = 60) ranks; it doesn't decide.</summary>
+          <p>Fusing ranks avoids the scale mismatch between ts_rank_cd and cosine. But an RRF score has no absolute meaning, so it cannot say &ldquo;this is a duplicate&rdquo;.</p>
+        </details>
+        <details class="decision-item">
+          <summary>5. Calibrated thresholds decide.</summary>
+          <p>Cosine to the best same-category candidate: &ge; 0.80 auto-merge, 0.70&ndash;0.80 human review, &lt; 0.70 new; an exact error-code match lifts a candidate to at least review but never lowers the 0.80 bar for auto-merge. On the 31-ticket labeled set (in-sample): 21 of 23 duplicates auto-merged, 0 wrong merges, 4 sent to review (2 real, 2 lookalikes), 0 missed.</p>
+        </details>
+        <details class="decision-item">
+          <summary>6. Category is part of the query.</summary>
+          <p>The classifier suggests a category, the user confirms it, and search runs inside it. The best cross-category hit is shown as &ldquo;related&rdquo; but never acted on.</p>
+        </details>
+        <details class="decision-item">
+          <summary>7. Iterative scans for filtered ANN.</summary>
+          <p>HNSW collects about ef_search candidates and filters afterwards, so a filter can starve the result. pgvector 0.8's hnsw.iterative_scan = strict_order keeps walking until enough rows match, in exact distance order.</p>
+        </details>
+        <details class="decision-item">
+          <summary>8. Honest about scale.</summary>
+          <p>At 30 rows Postgres correctly picks a sequential scan (checked with EXPLAIN), and the UI shows the real plan. An &ldquo;ANN lab&rdquo; forces the index to demonstrate the filter trap; the benchmark measures HNSW at 100k rows.</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- ALREADY MEASURED -->
+    <section class="content-section" id="measured" aria-labelledby="measured-title">
+      <p class="eyebrow">Numbers: Measured vs Still to Measure</p>
+      <h2 class="section-heading" id="measured-title">Already measured (in-sample).</h2>
+      <p class="section-intro">Measured on fastembed's bge-small, PostgreSQL 16, and the 30-seed + 31-labeled set.</p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <caption class="sr-only">Verified results and measured metrics</caption>
+          <thead>
+            <tr>
+              <th scope="col">Metric</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Duplicate decision, 31-ticket labeled set (23 dups, 8 new), in-sample</th>
+              <td>Auto &ge; 0.80: 21 auto-merged, 0 wrong; 4 to review; 0 missed</td>
+            </tr>
+            <tr>
+              <th scope="row">Margin on that set (in-sample)</th>
+              <td>Closest lookalike 0.754, weakest real duplicate 0.755</td>
+            </tr>
+            <tr>
+              <th scope="row">Top-1 candidate accuracy on 23 duplicates (in-sample)</th>
+              <td>23 / 23</td>
+            </tr>
+            <tr>
+              <th scope="row">Code cases: 6 tickets with error codes (in-sample)</th>
+              <td>3 auto-merged correctly, 3 to review, 0 wrong merges</td>
+            </tr>
+            <tr>
+              <th scope="row">HNSW with category filter, forced, ef_search 5, no iterative scan</th>
+              <td>1 of 5 requested rows returned</td>
+            </tr>
+            <tr>
+              <th scope="row">Lexical branch, 100k template tickets (dev container)</th>
+              <td>About 500&ndash;840 ms sequential scan; 26&ndash;166 ms with hits prefilter (GIN index)</td>
+            </tr>
+            <tr>
+              <th scope="row">Query embedding, warm, 2 threads (dev container)</th>
+              <td>About 5.9 ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- HOW IT WORKS TAB -->
+<section id="how-it-works" class="tab-panel" data-tab="how-it-works" hidden aria-label="How TriageLens Works">
+  <div class="container">
+    <header class="page-heading">
+      <p class="eyebrow">Interactive Walkthrough</p>
+      <h1 class="section-heading">The 8-step live demo script.</h1>
+      <p class="section-intro">Walk through every guarantee, reproducing each measured result on the seed database.</p>
+    </header>
+
+    <ol class="demo-steps">
+      <li class="card demo-step">
+        <span class="step-number mono">01</span>
+        <div class="step-body">
+          <h3>Open the site (No login required)</h3>
+          <dl class="step-dl">
+            <dt>Observe</dt>
+            <dd>Three search columns (Lexical, Semantic, Fused) and the telemetry strip: DB ms, embed ms, query plan, model name, and pgvector version.</dd>
+            <dt>Why</dt>
+            <dd>Transparency into what the database engine is actually executing.</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">02</span>
+        <div class="step-body">
+          <h3>Preset &ldquo;Opaque code: E_0X7F3A&rdquo;</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click the <code>Opaque code</code> chip.</dd>
+            <dt>Observe</dt>
+            <dd>Lexical pins BUG-109 #1 with an &ldquo;exact code&rdquo; badge; Semantic has it at #16; Fused puts it #1.</dd>
+            <dt>Why</dt>
+            <dd>&ldquo;Embeddings can't see opaque IDs. Exact matching can.&rdquo;</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">03</span>
+        <div class="step-body">
+          <h3>Preset &ldquo;Mobile avatar upload screen hangs&rdquo;</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click the <code>Paraphrase</code> chip.</dd>
+            <dt>Observe</dt>
+            <dd>Lexical is empty; Semantic and Fused rank BUG-102 #1 (cosine 0.66).</dd>
+            <dt>Why</dt>
+            <dd>&ldquo;Zero shared words. Minimum-should-match keeps one-word noise matches from outranking it.&rdquo;</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">04</span>
+        <div class="step-body">
+          <h3>Preset &ldquo;Android checkout dark mode&rdquo;</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click <code>Category collision</code>. Observe All, then switch to Bugs, then Features.</dd>
+            <dt>Observe</dt>
+            <dd>On All, FEAT-201 and BUG-105 tie. Under Bugs: BUG-105 #1. Under Features: FEAT-201 #1.</dd>
+            <dt>Why</dt>
+            <dd>&ldquo;A crash bug must never be merged into a feature request.&rdquo;</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">05</span>
+        <div class="step-body">
+          <h3>Triage &ldquo;Night mode for checkout on Android&rdquo;</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click <code>Duplicate feature</code>, review Preview, and click &ldquo;Add vote&rdquo;.</dd>
+            <dt>Observe</dt>
+            <dd>Decision is DUPLICATE of FEAT-201 (cosine 0.88). Vote counter bumps from 14 to 15.</dd>
+            <dt>Why</dt>
+            <dd>Features with high similarity accumulate community interest instead of cluttering the tracker.</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">06</span>
+        <div class="step-body">
+          <h3>Triage &ldquo;Dark mode for the web dashboard&rdquo;</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click <code>Lookalike feature</code>, review Preview, and click &ldquo;Not a duplicate&rdquo;.</dd>
+            <dt>Observe</dt>
+            <dd>Decision is REVIEW (closest is FEAT-201 at 0.75, but it is a distinct platform). New ticket is created.</dd>
+            <dt>Why</dt>
+            <dd>&ldquo;That grey zone is why there are two thresholds.&rdquo;</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">07</span>
+        <div class="step-body">
+          <h3>Preset &ldquo;PII + triage&rdquo;</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click <code>PII + triage</code> and preview.</dd>
+            <dt>Observe</dt>
+            <dd>8 redactions (email, phone, IP, UPI ID, PAN, card, 2 secrets). Order ref <code>2345 6789 0125</code> stays because its Verhoeff check fails.</dd>
+            <dt>Why</dt>
+            <dd>&ldquo;Checksums keep random 12-digit numbers from being falsely redacted.&rdquo;</dd>
+          </dl>
+        </div>
+      </li>
+      <li class="card demo-step">
+        <span class="step-number mono">08</span>
+        <div class="step-body">
+          <h3>ANN lab &amp; filter trap</h3>
+          <dl class="step-dl">
+            <dt>Action</dt>
+            <dd>Click <code>Filter trap</code>. Compare iterative scan off vs strict_order.</dd>
+            <dt>Observe</dt>
+            <dd>Iterative scan off returns 1 row (starvation). strict_order returns 5 rows in exact distance order.</dd>
+            <dt>Why</dt>
+            <dd>&ldquo;HNSW filters after collecting candidates; iterative scans keep walking until the filter is satisfied.&rdquo;</dd>
+          </dl>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- TRY IT TAB -->
+<section id="try" class="tab-panel" data-tab="try" hidden aria-label="Try TriageLens">
+  <div class="container try-layout">
+    <!-- 1. SEARCH BAR & PRESETS -->
+    <div class="search-box">
+      <div class="search-input-wrap">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+        </svg>
+        <input type="search" id="search-input" class="search-input" placeholder="Search tickets (e.g. Android checkout crash, ERR_PG_POOL_TIMEOUT_504...)" aria-label="Search tickets">
+      </div>
+      <div class="search-controls">
+        <div class="pills-group" role="group" aria-label="Category filter">
+          <button type="button" class="pill-btn" data-category="" aria-pressed="true">All</button>
+          <button type="button" class="pill-btn" data-category="BUG_REPORT" aria-pressed="false">Bugs</button>
+          <button type="button" class="pill-btn" data-category="FEATURE_REQUEST" aria-pressed="false">Features</button>
+          <button type="button" class="pill-btn" data-category="CLIENT_ENQUIRY" aria-pressed="false">Enquiries</button>
+        </div>
+        <div class="presets-wrap" role="group" aria-label="Preset queries">
+          <span class="presets-label">Presets:</span>
+          <button type="button" class="chip-btn" data-preset="opaque">Opaque code</button>
+          <button type="button" class="chip-btn" data-preset="descriptive">Descriptive code</button>
+          <button type="button" class="chip-btn" data-preset="paraphrase">Paraphrase</button>
+          <button type="button" class="chip-btn" data-preset="collision">Category collision</button>
+          <button type="button" class="chip-btn" data-preset="dup-feature">Duplicate feature</button>
+          <button type="button" class="chip-btn" data-preset="lookalike">Lookalike feature</button>
+          <button type="button" class="chip-btn" data-preset="pii-triage">PII + triage</button>
+          <button type="button" class="chip-btn" data-preset="filter-trap">Filter trap</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. THE INSPECTOR -->
+    <div class="inspector-card">
+      <div class="inspector-col-header">
+        <div>
+          <h2>Hybrid Search Inspector</h2>
+          <p class="muted">Three result lists from one hybrid query. Hover a fused row to cross-highlight in all columns.</p>
+        </div>
+      </div>
+      <div class="inspector-grid">
+        <!-- Lexical Column -->
+        <div class="inspector-col" id="col-lexical">
+          <div class="inspector-col-header">
+            <span>Lexical (Full-text GIN)</span>
+            <span class="col-count" id="count-lexical">0 rows</span>
+          </div>
+          <div class="inspector-list" id="list-lexical"></div>
+        </div>
+        <!-- Semantic Column -->
+        <div class="inspector-col" id="col-semantic">
+          <div class="inspector-col-header">
+            <span>Semantic (pgvector HNSW)</span>
+            <span class="col-count" id="count-semantic">0 rows</span>
+          </div>
+          <div class="inspector-list" id="list-semantic"></div>
+        </div>
+        <!-- Fused Column -->
+        <div class="inspector-col" id="col-fused">
+          <div class="inspector-col-header">
+            <span>Fused (RRF k=60)</span>
+            <span class="col-count" id="count-fused">0 rows</span>
+          </div>
+          <div class="inspector-list" id="list-fused"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. TELEMETRY STRIP -->
+    <div class="telemetry-strip" id="telemetry-strip">
+      <span class="telemetry-item">
+        <span class="telemetry-label">Embed:</span>
+        <span class="telemetry-val" id="telem-embed">&mdash;</span>
+      </span>
+      <span class="telemetry-item">
+        <span class="telemetry-label">DB:</span>
+        <span class="telemetry-val" id="telem-db">&mdash;</span>
+      </span>
+      <span class="telemetry-item">
+        <span class="telemetry-label">Plan:</span>
+        <span class="telemetry-val" id="telem-plan">&mdash;</span>
+      </span>
+      <span class="telemetry-item">
+        <span class="telemetry-label">pgvector:</span>
+        <span class="telemetry-val" id="telem-pgvector">&mdash;</span>
+      </span>
+      <span class="telemetry-item">
+        <span class="telemetry-label">Model:</span>
+        <span class="telemetry-val" id="telem-model">&mdash;</span>
+      </span>
+      <span class="telemetry-item">
+        <span class="telemetry-label">Indexes:</span>
+        <span class="telemetry-val" id="telem-indexes">&mdash;</span>
+      </span>
+    </div>
+
+    <!-- 4. TRIAGE PANEL -->
+    <div class="triage-card" id="triage-panel">
+      <div class="inspector-col-header">
+        <div>
+          <h2>Intake Triage Panel</h2>
+          <p class="muted">Submit new ticket text to scrub PII, get classifier suggestion, review candidates, and take action.</p>
+        </div>
+      </div>
+      <form class="triage-form" id="triage-form">
+        <div class="form-field full">
+          <label class="form-label" for="triage-title">Ticket Title</label>
+          <input type="text" id="triage-title" class="form-input" placeholder="e.g. Night mode for checkout on Android" required>
+        </div>
+        <div class="form-field full">
+          <label class="form-label" for="triage-desc">Ticket Description</label>
+          <textarea id="triage-desc" class="form-textarea" placeholder="Detailed issue description with optional error logs..." required></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="triage-error-code">Error Code (Optional)</label>
+          <input type="text" id="triage-error-code" class="form-input mono" placeholder="e.g. ERR_PG_POOL_TIMEOUT_504">
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="triage-category">Category Override</label>
+          <select id="triage-category" class="form-select">
+            <option value="">Auto-detect suggestion</option>
+            <option value="BUG_REPORT">Bug Report</option>
+            <option value="FEATURE_REQUEST">Feature Request</option>
+            <option value="CLIENT_ENQUIRY">Client Enquiry</option>
+          </select>
+        </div>
+        <div class="form-field full">
+          <button type="submit" class="btn btn-primary" id="triage-preview-btn">Preview Triage</button>
+        </div>
+      </form>
+
+      <!-- Preview Output Area -->
+      <div class="triage-results hidden" id="triage-results">
+        <!-- PII Diff -->
+        <div>
+          <h3>PII Scrubbing Diff</h3>
+          <div class="pii-diff-container">
+            <div class="pii-box">
+              <span class="pii-box-title">Original Text</span>
+              <div class="pii-content" id="pii-orig-text"></div>
+            </div>
+            <div class="pii-box">
+              <span class="pii-box-title">Scrubbed Text</span>
+              <div class="pii-content" id="pii-scrubbed-text"></div>
+              <div class="pii-counts-bar" id="pii-counts-bar"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Suggestion Badge -->
+        <div class="card" id="suggestion-card">
+          <div class="decision-header">
+            <div>
+              <span class="eyebrow">Classifier Suggestion</span>
+              <h3 id="suggestion-title">Category Suggestion</h3>
+            </div>
+            <span class="badge" id="suggestion-badge">Rules</span>
+          </div>
+          <p class="muted" id="suggestion-details"></p>
+        </div>
+
+        <!-- Decision Card -->
+        <div class="decision-card" id="decision-card">
+          <div class="decision-header">
+            <div>
+              <span class="eyebrow">Calibrated Decision</span>
+              <h3 id="decision-title">Duplicate Verdict</h3>
+            </div>
+            <span class="verdict-badge" id="verdict-badge">&mdash;</span>
+          </div>
+          <div id="decision-meta"></div>
+          <div class="decision-actions" id="decision-actions"></div>
+          <div class="commit-result hidden" id="commit-result"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. MODEL CARD -->
+    <div class="model-card-panel" id="model-card-panel">
+      <div class="decision-header">
+        <div>
+          <h2>Model Card &amp; Calibration</h2>
+          <span class="in-sample-badge">in-sample</span>
+        </div>
+      </div>
+      <p class="muted">Calibrated duplicate detection report against the 31-ticket labeled set.</p>
+      <div id="model-card-content" class="table-wrap">
+        <p class="muted" id="model-card-status">Loading calibration report&hellip;</p>
+      </div>
+    </div>
+
+    <!-- 6. ANN LAB -->
+    <details class="ann-details" id="ann-details">
+      <summary>ANN Lab &mdash; Filter Trap Demonstration</summary>
+      <p class="muted ann-summary-note">Explore pgvector HNSW candidate collection behavior under selective category filters.</p>
+      <form class="ann-form" id="ann-form">
+        <div class="form-field">
+          <label class="form-label" for="ann-query">Query Text</label>
+          <input type="text" id="ann-query" class="form-input" value="checkout crashes in dark mode" required>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ann-category">Filter Category</label>
+          <select id="ann-category" class="form-select">
+            <option value="FEATURE_REQUEST" selected>Feature Request</option>
+            <option value="BUG_REPORT">Bug Report</option>
+            <option value="CLIENT_ENQUIRY">Client Enquiry</option>
+            <option value="">All Categories</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ann-force">Force Index Scan</label>
+          <select id="ann-force" class="form-select">
+            <option value="1" selected>Force ON (disable seq scan)</option>
+            <option value="0">Force OFF (planner default)</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ann-ef">ef_search</label>
+          <select id="ann-ef" class="form-select">
+            <option value="5" selected>5 (demonstrate filter trap)</option>
+            <option value="10">10</option>
+            <option value="40">40 (default)</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ann-iterative">Iterative Scan</label>
+          <select id="ann-iterative" class="form-select">
+            <option value="off" selected>off (trap occurs)</option>
+            <option value="strict_order">strict_order (fixes trap)</option>
+            <option value="relaxed_order">relaxed_order</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <button type="submit" class="btn btn-secondary" id="ann-run-btn">Run ANN Test</button>
+        </div>
+      </form>
+      <div class="ann-results hidden" id="ann-results"></div>
+    </details>
+
+    <!-- 7. RESET MY DEMO -->
+    <div class="reset-section">
+      <div>
+        <h3>Reset My Demo</h3>
+        <p class="muted">Cleans up items, votes, and idempotency keys created during this session.</p>
+      </div>
+      <button type="button" class="btn btn-secondary" id="reset-demo-btn">Reset My Demo</button>
+    </div>
+  </div>
+</section>
+</main>
+
+</body>
+</html>

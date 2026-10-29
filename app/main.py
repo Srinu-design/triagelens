@@ -1,13 +1,16 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI
 from redis.asyncio import Redis
+from starlette.staticfiles import StaticFiles
 
 from app.api.ann_lab import router as ann_lab_router
 from app.api.health import router as health_router
 from app.api.items import router as items_router
+from app.api.pages import router as pages_router
 from app.api.search import router as search_router
 from app.api.session import router as session_router
 from app.config import Settings
@@ -61,6 +64,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     register_error_handlers(app)
     app.add_middleware(SessionMiddleware)
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).resolve().parent.parent / "static"),
+        name="static",
+    )
+    app.include_router(pages_router)
     app.include_router(health_router)
     app.include_router(search_router)
     app.include_router(ann_lab_router)
