@@ -76,6 +76,12 @@ async def clean_non_seed_rows(engine):
         await connection.execute(text("DELETE FROM votes"))
         await connection.execute(text("DELETE FROM intake_items WHERE owner_session IS NOT NULL"))
         await connection.execute(text("DELETE FROM sessions"))
+    # Tests insert and delete many copies of seed vectors; until a vacuum the HNSW graph is mostly
+    # dead duplicates and can return a single row once the planner picks it (autovacuum does this
+    # in production, but never in time on a fresh 30-row test table).
+    async with engine.connect() as connection:
+        await connection.execution_options(isolation_level="AUTOCOMMIT")
+        await connection.execute(text("VACUUM intake_items"))
 
 
 @pytest_asyncio.fixture(autouse=True)
