@@ -6,4 +6,3 @@ __pycache__/
 .env
 .models/
 bench/build.json
-bench/RESULTS.md

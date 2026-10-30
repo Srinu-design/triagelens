@@ -62,7 +62,16 @@ The closest lookalike, “Dark mode for the web dashboard”, scores **0.7542**;
 
 ## Benchmark
 
-See [`bench/RESULTS.md`](bench/RESULTS.md) for the measured benchmark report, which the manager adds after the full run.
+100,000 template-generated tickets, 200 queries, on a laptop (i7-13700H, PostgreSQL 16.15, pgvector 0.8.7). Full tables, machine details and query plans are in [`bench/RESULTS.md`](bench/RESULTS.md). The templates give only 7,157 distinct texts, so recall counts ties by distance, and real ticket text may behave differently.
+
+| Measurement | Result |
+| --- | --- |
+| HNSW recall@10, `ef_search` 40 (halfvec / float32) | 0.990 / 0.975, p50 about 1.0 ms |
+| Enquiry filter (10% of rows), `ef_search` 40, iterative scan off | 7.1 of 10 rows returned, recall 0.708 |
+| Same, `strict_order` / partial index | 10 rows, recall 0.982 / 1.000 |
+| Full hybrid query, SQL only, All / Enquiries | p50 127 / 25 ms, p95 407 / 56 ms; lexical branch uses `intake_tsv_gin` |
+| Query embedding | p50 7.9 ms |
+| halfvec vs float32 HNSW size | 15.7 MB vs 27.7 MB |
 
 ## Local setup
 
