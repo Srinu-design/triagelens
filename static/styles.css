@@ -1,25 +1,25 @@
 /* TriageLens — Modern portfolio style with Lagoon cyan-to-blue accent */
 :root {
   color-scheme: light;
-  --bg: #f8fafc;
-  --panel: #f1f5f9;
-  --panel-2: #e2e8f0;
+  --bg: #faf9f5;
+  --panel: #f0efeb;
+  --panel-2: #e7e5df;
   --surface: #ffffff;
   --card: rgb(255 255 255 / 85%);
   --glass: rgb(255 255 255 / 80%);
   --edge: rgb(255 255 255 / 90%);
-  --line: rgb(15 23 42 / 12%);
-  --line-strong: rgb(15 23 42 / 24%);
-  --field: #64748b;
-  --text: #0f172a;
-  --muted: #475569;
+  --line: rgb(27 27 27 / 12%);
+  --line-strong: rgb(27 27 27 / 24%);
+  --field: #858179;
+  --text: #1b1b1b;
+  --muted: #5e5b54;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --shadow-sm: 0 1px 2px rgb(15 23 42 / 5%);
-  --shadow: 0 4px 6px -1px rgb(15 23 42 / 7%), 0 2px 4px -2px rgb(15 23 42 / 5%);
-  --shadow-lg: 0 10px 25px -5px rgb(15 23 42 / 10%), 0 8px 10px -6px rgb(15 23 42 / 8%);
+  --shadow-sm: 0 1px 2px rgb(27 27 27 / 5%);
+  --shadow: 0 4px 6px -1px rgb(27 27 27 / 7%), 0 2px 4px -2px rgb(27 27 27 / 5%);
+  --shadow-lg: 0 10px 25px -5px rgb(27 27 27 / 10%), 0 8px 10px -6px rgb(27 27 27 / 8%);
   --lagoon: linear-gradient(135deg, #0891b2, #2563eb);
-  --lagoon-glow: rgb(8 145 178 / 20%);
+  --lagoon-glow: rgb(8 145 178 / 6%);
   --lagoon-text: #0284c7;
   --primary: #0284c7;
   --primary-subtle: #e0f2fe;
@@ -37,8 +37,8 @@
   --info: #0284c7;
   --info-bg: #f0f9ff;
   --info-border: #bae6fd;
-  --code-bg: #0f172a;
-  --code-text: #f8fafc;
+  --code-bg: #1c1c1f;
+  --code-text: #e9e7e1;
   --highlight: #fef08a;
   --highlight-border: #eab308;
   --r-card: 14px;
@@ -155,7 +155,7 @@ img { height: auto; }
 .nav-links a { display: inline-flex; align-items: center; min-height: 38px; color: #94a3b8; font-size: 0.8rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .nav-links a:hover, .nav-links a[aria-current] { color: #ffffff; }
 .nav-github { display: inline-flex; align-items: center; justify-content: center; flex: none; min-height: 36px; padding: 6px 16px; border: 1.5px solid rgb(255 255 255 / 35%); border-radius: 10px; color: #f8fafc; font-size: 0.78rem; font-weight: 700; text-decoration: none; transition: background var(--transition), color var(--transition); }
-.nav-github:hover { background: #f8fafc; color: #0b0f17; }
+.nav-github:hover { background: #faf9f5; color: #181818; }
 .portfolio-nav :focus-visible { outline-color: #ffffff; }
 
 /* Project bar */
@@ -236,7 +236,7 @@ html:not([data-theme="dark"]) .icon-sun { display: none; }
   margin: 0 0 24px 0;
   padding: 14px 18px;
   border-left: 3px solid var(--primary);
-  background: var(--primary-subtle);
+  background: var(--panel);
   border-radius: 0 var(--r-inner) var(--r-inner) 0;
   font-size: 0.95rem;
   color: var(--text);
