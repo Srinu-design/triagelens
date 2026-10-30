@@ -24,6 +24,7 @@ SECURITY_HEADERS = [
     (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
     (b"cross-origin-opener-policy", b"same-origin"),
 ]
+SECURITY_HEADER_NAMES = {name for name, _ in SECURITY_HEADERS}
 
 
 class BodyLimitMiddleware:
@@ -38,22 +39,21 @@ class BodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        async def too_large():
+            # DECISION: The §10 error table has no code for 413; use PAYLOAD_TOO_LARGE.
+            await make_problem_response(
+                413,
+                "PAYLOAD_TOO_LARGE",
+                "Payload Too Large",
+                f"Request body exceeds {self.max_body_size // 1024} KB limit.",
+            )(scope, receive, send)
+
         # 1. Check Content-Length header before reading chunks
-        headers = dict(scope.get("headers", []))
-        cl_header = headers.get(b"content-length")
+        cl_header = dict(scope.get("headers", [])).get(b"content-length")
         if cl_header:
             try:
-                content_length = int(cl_header.decode("latin1"))
-                if content_length > self.max_body_size:
-                    scope.setdefault("state", {})["error_code"] = "PAYLOAD_TOO_LARGE"
-                    # DECISION: The §10 error table has no code for 413; use PAYLOAD_TOO_LARGE.
-                    res = make_problem_response(
-                        413,
-                        "PAYLOAD_TOO_LARGE",
-                        "Payload Too Large",
-                        f"Request body exceeds {self.max_body_size // 1024} KB limit.",
-                    )
-                    await res(scope, receive, send)
+                if int(cl_header.decode("latin1")) > self.max_body_size:
+                    await too_large()
                     return
             except ValueError:
                 pass
@@ -67,15 +67,7 @@ class BodyLimitMiddleware:
                 chunk = message.get("body", b"")
                 total_bytes += len(chunk)
                 if total_bytes > self.max_body_size:
-                    scope.setdefault("state", {})["error_code"] = "PAYLOAD_TOO_LARGE"
-                    # DECISION: The §10 error table has no code for 413; use PAYLOAD_TOO_LARGE.
-                    res = make_problem_response(
-                        413,
-                        "PAYLOAD_TOO_LARGE",
-                        "Payload Too Large",
-                        f"Request body exceeds {self.max_body_size // 1024} KB limit.",
-                    )
-                    await res(scope, receive, send)
+                    await too_large()
                     return
                 chunks.append(chunk)
                 if not message.get("more_body", False):
@@ -113,8 +105,11 @@ class SecurityHeadersMiddleware:
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":
-                names = {name for name, _ in SECURITY_HEADERS}
-                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in names]
+                headers = [
+                    (k, v)
+                    for k, v in message.get("headers", [])
+                    if k.lower() not in SECURITY_HEADER_NAMES
+                ]
                 headers.extend(SECURITY_HEADERS)
                 # Revalidate pages and assets (cheap with the ETag) so a deploy shows at once.
                 if not any(k.lower() == b"cache-control" for k, _ in headers):

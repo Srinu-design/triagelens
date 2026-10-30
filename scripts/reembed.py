@@ -28,7 +28,7 @@ async def reembed(engine, embedder) -> int:
                 )
             ).all()
             if not rows:
-                return total
+                break
             embeddings = await embedder.embed_many(
                 [embed_ticket_text(row.title, row.description) for row in rows]
             )
@@ -44,6 +44,12 @@ async def reembed(engine, embedder) -> int:
             )
             last_id = rows[-1].id
             total += len(rows)
+    # Every row was rewritten: until a vacuum the HNSW graph is mostly dead copies, which can
+    # starve index scans (VACUUM cannot run inside a transaction, hence AUTOCOMMIT).
+    async with engine.connect() as connection:
+        await connection.execution_options(isolation_level="AUTOCOMMIT")
+        await connection.execute(text("VACUUM ANALYZE intake_items"))
+    return total
 
 
 async def main():

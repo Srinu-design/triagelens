@@ -16,41 +16,27 @@ import urllib.parse
 import urllib.request
 
 
-def _get(base: str, path: str) -> tuple[int, dict, dict]:
-    url = f"{base}{path}"
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        status = resp.status
-        headers = {k.lower(): v for k, v in resp.headers.items()}
-        data = resp.read()
-        try:
-            body = json.loads(data.decode("utf-8")) if data else {}
-        except Exception:
-            body = {}
-        return status, headers, body
-
-
-def _post_json(base: str, path: str, payload: dict) -> tuple[int, dict, dict]:
-    url = f"{base}{path}"
-    data = json.dumps(payload).encode("utf-8")
+def _request(base: str, path: str, payload: dict | None = None) -> tuple[int, dict, dict]:
+    """GET path, or POST payload as JSON; return status, lower-cased headers and the JSON body."""
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        f"{base}{path}", data=data, headers={"Content-Type": "application/json"} if data else {}
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
-        status = resp.status
         headers = {k.lower(): v for k, v in resp.headers.items()}
-        body = json.loads(resp.read().decode("utf-8"))
-        return status, headers, body
+        raw = resp.read()
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = {}  # GET / is HTML
+        return resp.status, headers, body
 
 
 def smoke(base_url: str) -> None:
     base = base_url.rstrip("/")
 
     # 1. /readyz is 200 with model_ready true
-    status, _, ready = _get(base, "/readyz")
+    status, _, ready = _request(base, "/readyz")
     if status != 200:
         raise RuntimeError(f"/readyz returned status {status}")
     if ready.get("model_ready") is not True:
@@ -58,7 +44,7 @@ def smoke(base_url: str) -> None:
 
     # 2. GET /api/search?q=Mobile avatar upload screen hangs has BUG-102 as fused #1
     query = urllib.parse.quote("Mobile avatar upload screen hangs")
-    status, _, search_data = _get(base, f"/api/search?q={query}")
+    status, _, search_data = _request(base, f"/api/search?q={query}")
     if status != 200:
         raise RuntimeError(f"/api/search returned status {status}")
     fused = search_data.get("fused", [])
@@ -74,7 +60,7 @@ def smoke(base_url: str) -> None:
         "description": "Would love a dark theme when paying in the Android app.",
         "category_override": "FEATURE_REQUEST",
     }
-    status, _, preview_data = _post_json(base, "/api/triage/preview", preview_payload)
+    status, _, preview_data = _request(base, "/api/triage/preview", preview_payload)
     if status != 200:
         raise RuntimeError(f"/api/triage/preview returned status {status}")
     decision = preview_data.get("decision", {})
@@ -86,7 +72,7 @@ def smoke(base_url: str) -> None:
         )
 
     # 4. Response to / has Content-Security-Policy header
-    status, headers, _ = _get(base, "/")
+    status, headers, _ = _request(base, "/")
     if status != 200:
         raise RuntimeError(f"/ returned status {status}")
     if "content-security-policy" not in headers:

@@ -86,11 +86,28 @@ FROM fused f JOIN intake_items i ON i.id = f.id
 ORDER BY f.code_hit DESC, f.rrf DESC, cosine DESC;
 """
 
+SET_LOCAL_SQL = text(
+    "SELECT set_config(name, value, true) "
+    "FROM unnest(CAST(:names AS text[]), CAST(:values AS text[])) AS s(name, value)"
+)
+# pgvector version and both index sizes in one round trip
+TELEMETRY_SQL = text(
+    "SELECT name, pg_relation_size(name::regclass) AS bytes, "
+    "pg_size_pretty(pg_relation_size(name::regclass)) AS pretty, "
+    "(SELECT extversion FROM pg_extension WHERE extname = 'vector') AS version "
+    "FROM (VALUES ('intake_hnsw'), ('intake_tsv_gin')) AS indexes(name)"
+)
+
 ANN_SQL = """SELECT i.ticket_code
 FROM intake_items i
 WHERE {visibility}
 ORDER BY i.embedding <=> :qvec
 LIMIT 5"""
+
+
+async def set_local(conn: AsyncConnection, settings: dict[str, str]) -> None:
+    """SET LOCAL several settings in one round trip; names and values are bound, not formatted."""
+    await conn.execute(SET_LOCAL_SQL, {"names": list(settings), "values": list(settings.values())})
 
 
 def visibility(category: str | None) -> str:
@@ -123,8 +140,7 @@ async def hybrid_search(
 ) -> list:
     """Run the reference SQL; the caller supplies a read-only transaction and scrubbed text."""
     statement = _hybrid_statement(category)
-    await conn.execute(text("SET LOCAL hnsw.ef_search = 40"))
-    await conn.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+    await set_local(conn, {"hnsw.ef_search": "40", "hnsw.iterative_scan": "strict_order"})
     result = await conn.execute(
         statement, {"q": q, "qvec": qvec, "codes": codes, "sid": sid, "cat": category}
     )
@@ -167,27 +183,12 @@ async def search(app_state, *, q: str, sid: UUID, category: str | None, explain:
             conn, q=scrubbed, qvec=qvec, codes=codes, sid=sid, category=category
         )
         db_ms = (perf_counter() - started) * 1000
-        version = await conn.scalar(
-            text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
-        )
-        sizes = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT name, pg_relation_size(name::regclass) AS bytes, "
-                        "pg_size_pretty(pg_relation_size(name::regclass)) AS pretty "
-                        "FROM (VALUES ('intake_hnsw'), ('intake_tsv_gin')) AS indexes(name)"
-                    )
-                )
-            )
-            .mappings()
-            .all()
-        )
+        sizes = (await conn.execute(TELEMETRY_SQL)).mappings().all()
         # DECISION: Index sizes are keyed by index name, each with bytes and pretty fields.
         telemetry = {
             "embed_ms": round(embed_ms, 4),
             "db_ms": round(db_ms, 4),
-            "pgvector": version,
+            "pgvector": sizes[0]["version"],
             "model": app_state.embedder.model_name,
             "index_sizes": {
                 row["name"]: {"bytes": row["bytes"], "pretty": row["pretty"]} for row in sizes
@@ -240,13 +241,11 @@ async def ann_lab(
     qvec = await app_state.embedder.embed(scrubbed)
     sql = ANN_SQL.format(visibility=clause)
     parameters = {"qvec": qvec, "sid": sid, "cat": category}
+    settings = {"hnsw.ef_search": str(ef_search), "hnsw.iterative_scan": iterative}
+    if force:
+        settings |= dict.fromkeys(("enable_seqscan", "enable_bitmapscan", "enable_sort"), "off")
     async with read_transaction(app_state.engine) as conn:
-        await conn.execute(text(f"SET LOCAL hnsw.ef_search = {ef_search}"))
-        await conn.execute(text(f"SET LOCAL hnsw.iterative_scan = {iterative}"))
-        if force:
-            await conn.execute(text("SET LOCAL enable_seqscan = off"))
-            await conn.execute(text("SET LOCAL enable_bitmapscan = off"))
-            await conn.execute(text("SET LOCAL enable_sort = off"))
+        await set_local(conn, settings)
         plan = await conn.scalar(
             text("EXPLAIN (FORMAT JSON)\n" + sql).bindparams(bindparam("qvec", type_=HALFVEC(384))),
             parameters,

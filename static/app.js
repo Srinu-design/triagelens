@@ -7,20 +7,10 @@
   // Compute BASE from currentScript.src to support arbitrary mount prefixes (e.g. /triagelens/)
   const BASE = new URL('..', document.currentScript.src).pathname;
 
-  // Idempotency key generator with crypto.randomUUID and getRandomValues fallback for plain HTTP
+  // Idempotency key: crypto.randomUUID needs a secure context, so plain HTTP falls back to getRandomValues
   function generateIdempotencyKey() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      try {
-        return crypto.randomUUID();
-      } catch (_) {}
-    }
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    let hex = '';
-    for (let i = 0; i < bytes.length; i++) {
-      hex += bytes[i].toString(16).padStart(2, '0');
-    }
-    return hex;
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
   }
 
   // Toast notifications for Problem Details and informational notices
@@ -45,11 +35,7 @@
 
     container.appendChild(toast);
 
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.parentNode.removeChild(toast);
-      }
-    }, 5000);
+    setTimeout(() => toast.remove(), 5000);
   }
 
   // Handle server readiness
@@ -166,32 +152,26 @@
     }
   }
 
-  // Cross-highlighting helper
-  function setupHoverHighlight(itemEl, ticketCode) {
-    itemEl.addEventListener('mouseenter', () => {
-      document.querySelectorAll(`[data-ticket-code="${ticketCode}"]`).forEach(el => {
-        el.classList.add('is-highlighted');
-      });
+  // Cross-highlighting: hovering or focusing a row highlights the same ticket in every column.
+  // Delegated once on the grid, so re-rendered rows need no listeners of their own.
+  const inspectorGrid = document.querySelector('.inspector-grid');
+  function highlightTicket(event, on) {
+    const row = event.target.closest('.inspector-item');
+    // moving within one row (or between its children) is not a leave
+    if (!row || (event.relatedTarget && row.contains(event.relatedTarget))) return;
+    inspectorGrid.querySelectorAll(`[data-ticket-code="${row.dataset.ticketCode}"]`).forEach(el => {
+      el.classList.toggle('is-highlighted', on);
     });
-    itemEl.addEventListener('mouseleave', () => {
-      document.querySelectorAll(`[data-ticket-code="${ticketCode}"]`).forEach(el => {
-        el.classList.remove('is-highlighted');
-      });
-    });
-    itemEl.addEventListener('focus', () => {
-      document.querySelectorAll(`[data-ticket-code="${ticketCode}"]`).forEach(el => {
-        el.classList.add('is-highlighted');
-      });
-    });
-    itemEl.addEventListener('blur', () => {
-      document.querySelectorAll(`[data-ticket-code="${ticketCode}"]`).forEach(el => {
-        el.classList.remove('is-highlighted');
-      });
-    });
+  }
+  if (inspectorGrid) {
+    inspectorGrid.addEventListener('mouseover', e => highlightTicket(e, true));
+    inspectorGrid.addEventListener('mouseout', e => highlightTicket(e, false));
+    inspectorGrid.addEventListener('focusin', e => highlightTicket(e, true));
+    inspectorGrid.addEventListener('focusout', e => highlightTicket(e, false));
   }
 
   // Render a ticket row for inspector
-  function createInspectorRow(item, rankNum, isFused) {
+  function createInspectorRow(item, rankNum) {
     const row = document.createElement('div');
     row.className = 'inspector-item';
     row.dataset.ticketCode = item.ticket_code;
@@ -249,29 +229,34 @@
     }
 
     row.appendChild(badges);
-
-    setupHoverHighlight(row, item.ticket_code);
     return row;
   }
 
-  function renderInspectorColumn(listEl, countEl, items, emptyReason, isFused) {
-    while (listEl.firstChild) {
-      listEl.removeChild(listEl.firstChild);
-    }
+  const COLUMNS = ['lexical', 'semantic', 'fused'].map(name => ({
+    name,
+    list: document.getElementById('list-' + name),
+    count: document.getElementById('count-' + name),
+  }));
+  const EMPTY_REASONS = {
+    lexical: 'No lexical matches found for this query.',
+    semantic: 'No semantic matches found for this query.',
+    fused: 'No fused results available.',
+  };
 
-    countEl.textContent = (items ? items.length : 0) + ' rows';
-
-    if (!items || items.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'col-empty';
-      empty.textContent = emptyReason;
-      listEl.appendChild(empty);
-      return;
-    }
-
-    items.forEach((item, idx) => {
-      const row = createInspectorRow(item, idx + 1, isFused);
-      listEl.appendChild(row);
+  // data: the search response, or null for "no query"
+  function renderInspector(data) {
+    COLUMNS.forEach(({ name, list, count }) => {
+      if (!list || !count) return;
+      const items = (data && data[name]) || [];
+      count.textContent = items.length + ' rows';
+      if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'col-empty';
+        empty.textContent = data ? EMPTY_REASONS[name] : 'No query entered.';
+        list.replaceChildren(empty);
+      } else {
+        list.replaceChildren(...items.map((item, idx) => createInspectorRow(item, idx + 1)));
+      }
     });
   }
 
@@ -311,22 +296,13 @@
   }
 
   async function executeSearch() {
-    if (!currentSearchQuery) {
-      const lexicalList = document.getElementById('list-lexical');
-      const semanticList = document.getElementById('list-semantic');
-      const fusedList = document.getElementById('list-fused');
-      const countLex = document.getElementById('count-lexical');
-      const countSem = document.getElementById('count-semantic');
-      const countFused = document.getElementById('count-fused');
-
-      if (lexicalList && countLex) renderInspectorColumn(lexicalList, countLex, [], 'No query entered.', false);
-      if (semanticList && countSem) renderInspectorColumn(semanticList, countSem, [], 'No query entered.', false);
-      if (fusedList && countFused) renderInspectorColumn(fusedList, countFused, [], 'No query entered.', true);
-      return;
-    }
-
     if (searchAbortController) {
       searchAbortController.abort();
+      searchAbortController = null;
+    }
+    if (!currentSearchQuery) {
+      renderInspector(null);
+      return;
     }
     searchAbortController = new AbortController();
 
@@ -349,23 +325,7 @@
       }
 
       const data = await res.json();
-      const lexicalList = document.getElementById('list-lexical');
-      const semanticList = document.getElementById('list-semantic');
-      const fusedList = document.getElementById('list-fused');
-      const countLex = document.getElementById('count-lexical');
-      const countSem = document.getElementById('count-semantic');
-      const countFused = document.getElementById('count-fused');
-
-      if (lexicalList && countLex) {
-        renderInspectorColumn(lexicalList, countLex, data.lexical, 'No lexical matches found for this query.', false);
-      }
-      if (semanticList && countSem) {
-        renderInspectorColumn(semanticList, countSem, data.semantic, 'No semantic matches found for this query.', false);
-      }
-      if (fusedList && countFused) {
-        renderInspectorColumn(fusedList, countFused, data.fused, 'No fused results available.', true);
-      }
-
+      renderInspector(data);
       renderTelemetry(data.telemetry);
     } catch (e) {
       if (e.name === 'AbortError') return;
@@ -386,9 +346,7 @@
   let activeCommitIdempotencyKey = null;
 
   function renderPiiTokens(containerEl, scrubbedText) {
-    while (containerEl.firstChild) {
-      containerEl.removeChild(containerEl.firstChild);
-    }
+    containerEl.replaceChildren();
 
     if (!scrubbedText) return;
 
@@ -407,9 +365,7 @@
   }
 
   function renderPiiCounts(containerEl, counts, total) {
-    while (containerEl.firstChild) {
-      containerEl.removeChild(containerEl.firstChild);
-    }
+    containerEl.replaceChildren();
 
     if (!counts || total === 0) {
       const none = document.createElement('span');
@@ -445,9 +401,7 @@
 
     if (commitResult) {
       commitResult.classList.add('hidden');
-      while (commitResult.firstChild) {
-        commitResult.removeChild(commitResult.firstChild);
-      }
+      commitResult.replaceChildren();
     }
 
     if (verdictBadge) {
@@ -459,9 +413,7 @@
     }
 
     if (decisionMeta) {
-      while (decisionMeta.firstChild) {
-        decisionMeta.removeChild(decisionMeta.firstChild);
-      }
+      decisionMeta.replaceChildren();
 
       const p = document.createElement('p');
       let text = 'Verdict: ' + verdict;
@@ -489,53 +441,30 @@
 
     // Build action buttons
     if (decisionActions) {
-      while (decisionActions.firstChild) {
-        decisionActions.removeChild(decisionActions.firstChild);
-      }
-
       // Generate fresh idempotency key for this commit choice
       activeCommitIdempotencyKey = generateIdempotencyKey();
+      const button = (label, primary, action, masterCode) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn ' + (primary ? 'btn-primary' : 'btn-secondary');
+        btn.textContent = label;
+        btn.addEventListener('click', () => executeCommit(action, masterCode));
+        return btn;
+      };
 
-      if (verdict === 'DUPLICATE' || verdict === 'REVIEW') {
-        const cat = preview.search_category || preview.suggestion?.category || 'BUG_REPORT';
-        if (cat === 'BUG_REPORT' && master) {
-          const linkBtn = document.createElement('button');
-          linkBtn.type = 'button';
-          linkBtn.className = 'btn btn-primary';
-          linkBtn.textContent = 'Link as duplicate of ' + master;
-          linkBtn.addEventListener('click', () => executeCommit('LINK', master));
-          decisionActions.appendChild(linkBtn);
-        } else if (cat === 'FEATURE_REQUEST' && master) {
-          const voteBtn = document.createElement('button');
-          voteBtn.type = 'button';
-          voteBtn.className = 'btn btn-primary';
-          voteBtn.textContent = 'Add vote to ' + master;
-          voteBtn.addEventListener('click', () => executeCommit('VOTE', master));
-          decisionActions.appendChild(voteBtn);
-        } else if (cat === 'CLIENT_ENQUIRY' && master) {
-          const ansBtn = document.createElement('button');
-          ansBtn.type = 'button';
-          ansBtn.className = 'btn btn-primary';
-          ansBtn.textContent = 'Send FAQ answer';
-          ansBtn.addEventListener('click', () => executeCommit('ANSWER', master));
-          decisionActions.appendChild(ansBtn);
-        }
-
-        // Always offer Not a duplicate
-        const notDupBtn = document.createElement('button');
-        notDupBtn.type = 'button';
-        notDupBtn.className = 'btn btn-secondary';
-        notDupBtn.textContent = 'Not a duplicate';
-        notDupBtn.addEventListener('click', () => executeCommit('NEW', null));
-        decisionActions.appendChild(notDupBtn);
+      if (verdict === 'NEW' || !master) {
+        decisionActions.replaceChildren(button('Create new ticket', true, 'NEW', null));
       } else {
-        // Verdict is NEW
-        const newBtn = document.createElement('button');
-        newBtn.type = 'button';
-        newBtn.className = 'btn btn-primary';
-        newBtn.textContent = 'Create new ticket';
-        newBtn.addEventListener('click', () => executeCommit('NEW', null));
-        decisionActions.appendChild(newBtn);
+        // the search category decides which action merges into the master
+        const [label, action] = {
+          BUG_REPORT: ['Link as duplicate of ' + master, 'LINK'],
+          FEATURE_REQUEST: ['Add vote to ' + master, 'VOTE'],
+          CLIENT_ENQUIRY: ['Send FAQ answer', 'ANSWER'],
+        }[preview.search_category];
+        decisionActions.replaceChildren(
+          button(label, true, action, master),
+          button('Not a duplicate', false, 'NEW', null),
+        );
       }
     }
   }
@@ -547,13 +476,12 @@
     actionButtons.forEach(btn => { btn.disabled = true; });
 
     const key = activeCommitIdempotencyKey || generateIdempotencyKey();
-    const cat = currentPreviewData.search_category || currentPreviewData.suggestion?.category || 'BUG_REPORT';
 
     const body = {
       title: triageTitleInput.value.trim(),
       description: triageDescInput.value.trim(),
       error_code: triageErrorCodeInput.value.trim() || null,
-      category: cat,
+      category: currentPreviewData.search_category,
       action: action,
       master_code: masterCode,
     };
@@ -579,9 +507,7 @@
       const resultEl = document.getElementById('commit-result');
       if (resultEl) {
         resultEl.classList.remove('hidden');
-        while (resultEl.firstChild) {
-          resultEl.removeChild(resultEl.firstChild);
-        }
+        resultEl.replaceChildren();
 
         let msg = '';
         if (action === 'NEW') {
@@ -636,16 +562,9 @@
         }),
       });
 
-      if (res.status === 404) {
-        showToast('Preview Unavailable', 'POST triage/preview endpoint is not deployed on this branch yet.', true);
-        triagePreviewBtn.disabled = false;
-        return;
-      }
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         showToast(err.title || 'Preview Failed', err.detail || 'Could not preview triage.', true);
-        triagePreviewBtn.disabled = false;
         return;
       }
 
@@ -716,150 +635,88 @@
   }
 
   // --- MODEL CARD LOADER ---
+  // A scrollable, captioned table; the first cell of each row is its row header.
+  function reportTable(captionText, headers, rows, className) {
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-label', captionText);
+    const table = document.createElement('table');
+    table.className = ('data-table ' + className).trim();
+    const caption = document.createElement('caption');
+    caption.textContent = captionText;
+    const heading = document.createElement('tr');
+    headers.forEach(label => {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      cell.textContent = label;
+      heading.appendChild(cell);
+    });
+    const head = document.createElement('thead');
+    head.appendChild(heading);
+    const body = document.createElement('tbody');
+    rows.forEach(values => {
+      const row = document.createElement('tr');
+      values.forEach((value, i) => {
+        const cell = document.createElement(i === 0 ? 'th' : 'td');
+        if (i === 0) cell.scope = 'row';
+        cell.textContent = String(value);
+        row.appendChild(cell);
+      });
+      body.appendChild(row);
+    });
+    table.append(caption, head, body);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
   async function loadModelCard() {
     const content = document.getElementById('model-card-content');
     if (!content) return;
+    const note = text => {
+      const p = document.createElement('p');
+      p.className = 'muted';
+      p.textContent = text;
+      content.replaceChildren(p);
+    };
 
     try {
       const res = await fetch(BASE + 'api/eval');
-      if (res.status === 404) {
-        while (content.firstChild) {
-          content.removeChild(content.firstChild);
-        }
-        const note = document.createElement('p');
-        note.className = 'muted';
-        note.textContent = 'Run eval/calibrate.py to generate calibration report.';
-        content.appendChild(note);
-        return;
-      }
-
       if (!res.ok) {
-        while (content.firstChild) {
-          content.removeChild(content.firstChild);
-        }
-        const note = document.createElement('p');
-        note.className = 'muted';
-        note.textContent = 'Could not load calibration report.';
-        content.appendChild(note);
+        note(res.status === 404 ? 'No calibration report yet: run eval/calibrate.py.' : 'Could not load calibration report.');
         return;
       }
-
+      // Every number comes from the report, so the card can never drift from the last calibration.
       const data = await res.json();
-      while (content.firstChild) {
-        content.removeChild(content.firstChild);
-      }
-
-      const table = document.createElement('table');
-      table.className = 'data-table';
-
-      const thead = document.createElement('thead');
-      const trH = document.createElement('tr');
-      ['Metric', 'Thresholds / Value', 'In-Sample Result'].forEach(h => {
-        const th = document.createElement('th');
-        th.textContent = h;
-        trH.appendChild(th);
-      });
-      thead.appendChild(trH);
-      table.appendChild(thead);
-
-      const tbody = document.createElement('tbody');
-
-      function addRow(name, val, resTxt) {
-        const tr = document.createElement('tr');
-        const th = document.createElement('th');
-        th.textContent = name;
-        const td1 = document.createElement('td');
-        td1.textContent = val;
-        const td2 = document.createElement('td');
-        td2.textContent = resTxt;
-        tr.appendChild(th);
-        tr.appendChild(td1);
-        tr.appendChild(td2);
-        tbody.appendChild(tr);
-      }
-
-      const tAuto = data.thresholds?.t_auto ?? 0.80;
-      const tReview = data.thresholds?.t_review ?? 0.70;
-      addRow('Thresholds', `t_auto=${tAuto}, t_review=${tReview}`, 'Calibrated on 31 tickets');
-
-      const cfg = data.configured || {};
-      addRow('Configured Performance',
-        `auto_correct=${cfg.auto_correct ?? 21}, auto_wrong=${cfg.auto_wrong ?? 0}`,
-        `review=${cfg.review ?? 4}, missed=${cfg.missed ?? 0}`
+      const { t_auto: tAuto, t_review: tReview } = data.thresholds;
+      const cfg = data.configured;
+      const { closest_lookalike: lookalike, weakest_duplicate: weakest } = data.margin;
+      content.replaceChildren(
+        reportTable('Summary (in-sample)', ['Metric', 'Thresholds / Value', 'In-sample result'], [
+          ['Thresholds', `t_auto=${tAuto}, t_review=${tReview}`, `Calibrated on ${data.labeled_set.tickets} tickets`],
+          ['Configured performance', `auto_correct=${cfg.auto_correct}, auto_wrong=${cfg.auto_wrong}`,
+            `review=${cfg.review}, missed=${cfg.missed}`],
+          ['Margin separation', `Lookalike: ${lookalike.cosine}`,
+            `Weakest duplicate: ${weakest.cosine} (gap: ${(weakest.cosine - lookalike.cosine).toFixed(4)})`],
+          ['Top-1 accuracy', `${data.top1.correct} / ${data.top1.total}`, 'Correctly ranked labeled duplicates'],
+        ], ''),
+        reportTable('Threshold grid (in-sample)',
+          ['Auto ≥', 'Review ≥', 'Auto-correct', 'Auto-wrong', 'Review', 'Missed'],
+          data.grid.map(row => [
+            String(row.t_auto) + (row.t_auto === tAuto && row.t_review === tReview ? ' configured' : ''),
+            row.t_review, row.auto_correct, row.auto_wrong, row.review, row.missed,
+          ]), 'model-grid'),
+        reportTable('Code cases (in-sample)',
+          ['Title', 'Truth', 'Closest (cosine)', 'Verdict', 'Expected verdict', 'Pass'],
+          data.code_cases.map(row => [
+            row.title, row.truth,
+            row.closest + ' (' + Number(row.cosine).toFixed(3) + ')',
+            row.verdict, row.expected_verdict, row.pass ? 'pass' : 'FAIL',
+          ]), 'model-code-cases'),
       );
-
-      const margin = data.margin || {};
-      addRow('Margin Separation',
-        `Lookalike: ${margin.closest_lookalike?.cosine ?? 0.754}`,
-        `Weakest Duplicate: ${margin.weakest_duplicate?.cosine ?? 0.755} (gap: 0.001)`
-      );
-
-      const top1 = data.top1 || {};
-      addRow('Top-1 accuracy (in-sample)', `${top1.correct ?? 23} / ${top1.total ?? 23}`, 'Correctly ranked labeled duplicates');
-
-      table.appendChild(tbody);
-      const summaryWrap = document.createElement('div');
-      summaryWrap.className = 'table-wrap';
-      summaryWrap.appendChild(table);
-      content.appendChild(summaryWrap);
-
-      function appendReportTable(captionText, headers, rows, className) {
-        const wrap = document.createElement('div');
-        wrap.className = 'table-wrap';
-        wrap.tabIndex = 0;
-        wrap.setAttribute('role', 'region');
-        wrap.setAttribute('aria-label', captionText);
-        const reportTable = document.createElement('table');
-        reportTable.className = 'data-table ' + className;
-        const caption = document.createElement('caption');
-        caption.textContent = captionText;
-        reportTable.appendChild(caption);
-        const head = document.createElement('thead');
-        const heading = document.createElement('tr');
-        headers.forEach(label => {
-          const cell = document.createElement('th');
-          cell.scope = 'col';
-          cell.textContent = label;
-          heading.appendChild(cell);
-        });
-        head.appendChild(heading);
-        reportTable.appendChild(head);
-        const body = document.createElement('tbody');
-        rows.forEach(values => {
-          const row = document.createElement('tr');
-          values.forEach(value => {
-            const cell = document.createElement('td');
-            cell.textContent = String(value);
-            row.appendChild(cell);
-          });
-          body.appendChild(row);
-        });
-        reportTable.appendChild(body);
-        wrap.appendChild(reportTable);
-        content.appendChild(wrap);
-      }
-
-      appendReportTable('Threshold grid (in-sample)',
-        ['Auto ≥', 'Review ≥', 'Auto-correct', 'Auto-wrong', 'Review', 'Missed'],
-        (data.grid || []).map(row => [
-          String(row.t_auto) + (row.t_auto === tAuto && row.t_review === tReview ? ' configured' : ''),
-          row.t_review, row.auto_correct, row.auto_wrong, row.review, row.missed,
-        ]), 'model-grid');
-      appendReportTable('Code cases (in-sample)',
-        ['Title', 'Truth', 'Closest (cosine)', 'Verdict', 'Expected verdict', 'Pass'],
-        (data.code_cases || []).map(row => [
-          row.title, row.truth,
-          row.closest + ' (' + Number(row.cosine).toFixed(3) + ')',
-          row.verdict, row.expected_verdict, row.pass ? 'pass' : 'FAIL',
-        ]), 'model-code-cases');
     } catch (_) {
-      while (content.firstChild) {
-        content.removeChild(content.firstChild);
-      }
-      const note = document.createElement('p');
-      note.className = 'muted';
-      note.textContent = 'Run eval/calibrate.py';
-      content.appendChild(note);
+      note('Could not load calibration report.');
     }
   }
 
@@ -901,9 +758,7 @@
 
       const data = await res.json();
       annResults.classList.remove('hidden');
-      while (annResults.firstChild) {
-        annResults.removeChild(annResults.firstChild);
-      }
+      annResults.replaceChildren();
 
       const p1 = document.createElement('p');
       p1.textContent = 'Rows returned: ' + data.rows_returned +
@@ -951,9 +806,7 @@
         }
 
         const data = await res.json();
-        const itemsCount = data.deleted_items ?? data.items_deleted ?? 0;
-        const votesCount = data.deleted_votes ?? data.votes_deleted ?? 0;
-        showToast('Demo Reset', `Removed ${itemsCount} items and ${votesCount} votes.`, false);
+        showToast('Demo Reset', `Removed ${data.deleted_items} items and ${data.deleted_votes} votes.`, false);
 
         // Hide triage results
         if (triageResults) triageResults.classList.add('hidden');
@@ -970,56 +823,35 @@
   }
 
   // --- PRESET CHIPS ---
-  const presetChips = document.querySelectorAll('[data-preset]');
-  presetChips.forEach(chip => {
+  const SEARCH_PRESETS = {
+    opaque: 'E_0X7F3A',
+    descriptive: 'ERR_PG_POOL_TIMEOUT_504',
+    paraphrase: 'Mobile avatar upload screen hangs',
+    collision: 'Android checkout dark mode',
+  };
+  const TRIAGE_PRESETS = {
+    'dup-feature': ['Night mode for checkout on Android', 'Would love a dark theme when paying in the Android app.', 'FEATURE_REQUEST'],
+    lookalike: ['Dark mode for the web dashboard', 'A dark theme for the desktop web dashboard would be nice.', 'FEATURE_REQUEST'],
+    'pii-triage': ['Payment failed and refund pending', 'Checkout failed for rahul.sharma@example.com (+91 9876543210). Server 192.168.1.44 returned 500; key sk-live-998877665544 is in the logs. Refund to UPI demo.user@oksbi. PAN AAAPZ1234C, card 4111 1111 1111 1111, order ref 2345 6789 0125. Authorization: Bearer abcDEF123456.xyz', 'BUG_REPORT'],
+  };
+
+  document.querySelectorAll('[data-preset]').forEach(chip => {
     chip.addEventListener('click', () => {
       const preset = chip.dataset.preset;
       switchTab('try', true);
 
-      if (preset === 'opaque') {
-        searchInput.value = 'E_0X7F3A';
-        currentSearchQuery = 'E_0X7F3A';
+      if (preset in SEARCH_PRESETS) {
+        searchInput.value = currentSearchQuery = SEARCH_PRESETS[preset];
         updateCategoryPills('');
         triggerSearch(true);
-      } else if (preset === 'descriptive') {
-        searchInput.value = 'ERR_PG_POOL_TIMEOUT_504';
-        currentSearchQuery = 'ERR_PG_POOL_TIMEOUT_504';
-        updateCategoryPills('');
-        triggerSearch(true);
-      } else if (preset === 'paraphrase') {
-        searchInput.value = 'Mobile avatar upload screen hangs';
-        currentSearchQuery = 'Mobile avatar upload screen hangs';
-        updateCategoryPills('');
-        triggerSearch(true);
-      } else if (preset === 'collision') {
-        searchInput.value = 'Android checkout dark mode';
-        currentSearchQuery = 'Android checkout dark mode';
-        updateCategoryPills('');
-        triggerSearch(true);
-      } else if (preset === 'dup-feature') {
-        triageTitleInput.value = 'Night mode for checkout on Android';
-        triageDescInput.value = 'Would love a dark theme when paying in the Android app.';
+      } else if (preset in TRIAGE_PRESETS) {
+        [triageTitleInput.value, triageDescInput.value, triageCategorySelect.value] = TRIAGE_PRESETS[preset];
         triageErrorCodeInput.value = '';
-        triageCategorySelect.value = 'FEATURE_REQUEST';
-        executePreview();
-        triageForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else if (preset === 'lookalike') {
-        triageTitleInput.value = 'Dark mode for the web dashboard';
-        triageDescInput.value = 'A dark theme for the desktop web dashboard would be nice.';
-        triageErrorCodeInput.value = '';
-        triageCategorySelect.value = 'FEATURE_REQUEST';
-        executePreview();
-        triageForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else if (preset === 'pii-triage') {
-        triageTitleInput.value = 'Payment failed and refund pending';
-        triageDescInput.value = 'Checkout failed for rahul.sharma@example.com (+91 9876543210). Server 192.168.1.44 returned 500; key sk-live-998877665544 is in the logs. Refund to UPI demo.user@oksbi. PAN AAAPZ1234C, card 4111 1111 1111 1111, order ref 2345 6789 0125. Authorization: Bearer abcDEF123456.xyz';
-        triageErrorCodeInput.value = '';
-        triageCategorySelect.value = 'BUG_REPORT';
         executePreview();
         triageForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } else if (preset === 'filter-trap') {
         const details = document.getElementById('ann-details');
-        if (details) details.open = true;
+        details.open = true;
         annQueryInput.value = 'checkout crashes in dark mode';
         annCategorySelect.value = 'FEATURE_REQUEST';
         annForceSelect.value = '1';

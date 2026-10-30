@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.errors import ApiError
-from app.limits import limit_items
-from app.schemas import ItemIn, ItemOut
+from app.limits import rate_limit
+from app.schemas import ItemIn, ItemOut, require_json
 from app.services.items import commit_item, get_item
 from app.session import current_session_id
 
@@ -16,21 +16,13 @@ router = APIRouter(prefix="/api/items", tags=["items"])
 IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
 
-@router.post("", status_code=201, dependencies=[Depends(limit_items)])
+@router.post("", status_code=201, dependencies=[Depends(rate_limit("commit"))])
 async def create_item(
     request: Request,
     item: ItemIn,
     session_id: Annotated[UUID, Depends(current_session_id)],
 ) -> JSONResponse:
-    content_type = request.headers.get("content-type", "").split(";")[0].strip()
-    if content_type != "application/json":
-        raise ApiError(
-            status=422,
-            code="VALIDATION_ERROR",
-            title="Invalid Content-Type",
-            detail="Content-Type must be application/json",
-        )
-
+    require_json(request)
     idempotency_key = request.headers.get("Idempotency-Key")
     if not idempotency_key or not IDEMPOTENCY_KEY_RE.match(idempotency_key):
         raise ApiError(

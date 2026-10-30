@@ -39,14 +39,12 @@ def make_problem_response(
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError):
-        request.state.error_code = exc.code
         return make_problem_response(
             exc.status, exc.code, exc.title, exc.detail, headers=exc.headers, **exc.extra
         )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        request.state.error_code = "VALIDATION_ERROR"
         # DECISION: A fixed validation detail avoids reflecting untrusted input or error contexts.
         return make_problem_response(
             422,
@@ -73,7 +71,6 @@ def register_error_handlers(app: FastAPI) -> None:
                 title = "HTTP Error"
 
         detail = exc.detail if exc.detail else title
-        request.state.error_code = code
         headers = dict(exc.headers) if exc.headers else None
         return make_problem_response(
             exc.status_code,

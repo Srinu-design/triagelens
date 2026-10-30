@@ -73,19 +73,18 @@ async def preview(app_state, sid: UUID, body: PreviewIn, *, allow_llm: bool = Tr
     for row in displayed:
         row["cosine"] = round(float(row["cosine"]), 4)
 
-    # DECISION: In production, request logs are handled exclusively by RequestLogMiddleware.
-    # We retain this info log only when explicitly enabled (e.g. test_preview caplog).
-    if logger.isEnabledFor(logging.INFO):
-        logger.info(
-            "preview",
-            extra={
-                "title_length": len(title),
-                "description_length": len(description),
-                "redaction_total": total,
-                "verdict": decision["verdict"],
-                "classifier_source": source,
-            },
-        )
+    # DECISION: RequestLogMiddleware writes the production request log; this INFO record (off by
+    # default) lets tests check that previews log lengths and counts, never ticket text.
+    logger.info(
+        "preview",
+        extra={
+            "title_length": len(title),
+            "description_length": len(description),
+            "redaction_total": total,
+            "verdict": decision["verdict"],
+            "classifier_source": source,
+        },
+    )
 
     return {
         "scrubbed": {"title": title, "description": description, "counts": counts, "total": total},

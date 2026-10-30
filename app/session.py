@@ -24,7 +24,10 @@ class SessionMiddleware(BaseHTTPMiddleware):
             await connection.execute(
                 text(
                     "INSERT INTO sessions (id) VALUES (:id) "
-                    "ON CONFLICT (id) DO UPDATE SET last_seen = now()"
+                    "ON CONFLICT (id) DO UPDATE SET last_seen = now() "
+                    # a 24 h idle TTL needs no finer clock; skipping the rewrite saves a dead row
+                    # (and its WAL) on nearly every request
+                    "WHERE sessions.last_seen < now() - interval '5 minutes'"
                 ),
                 {"id": session_id},
             )

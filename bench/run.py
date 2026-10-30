@@ -17,7 +17,7 @@ from app.db import create_engine, read_transaction
 from app.domain.codes import extract_codes
 from app.domain.pii import scrub
 from app.services.embeddings import embed_ticket_text, make_embedder
-from app.services.search import HYBRID_SQL, hybrid_search, visibility
+from app.services.search import HYBRID_SQL, SET_LOCAL_SQL, hybrid_search, visibility
 from bench.common import (
     BUILD_PATH,
     INDEXES,
@@ -119,7 +119,7 @@ class TimedHybridConnection:
         self.elapsed_ms = 0.0
 
     async def execute(self, statement, parameters=None):
-        if statement.text.startswith("SET LOCAL"):
+        if statement is SET_LOCAL_SQL:
             return await self.connection.execute(statement, parameters)
         # DECISION: Async SQLAlchemy execute buffers rows; time it without SET LOCAL round trips.
         started = perf_counter()
@@ -429,9 +429,13 @@ async def run(queries_count: int, seed: int):
             lines += [
                 f"### EXPLAIN (ANALYZE, BUFFERS): {category}",
                 "",
+                "<details><summary>Plan JSON</summary>",  # ~1,000 lines each, collapsed
+                "",
                 "```json",
                 json.dumps(result["plan"], indent=2),
                 "```",
+                "",
+                "</details>",
                 "",
             ]
         lines += ["## EC2 memory", ""]

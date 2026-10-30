@@ -82,8 +82,8 @@
           <dd>In-sample margin: closest lookalike vs weakest duplicate</dd>
         </div>
         <div class="hero-stat">
-          <dt class="mono">26&ndash;166 ms</dt>
-          <dd>Hybrid search at 100k rows with GIN prefilter (vs 500&ndash;840 ms scan)</dd>
+          <dt class="mono">25&ndash;127 ms</dt>
+          <dd>Full hybrid query p50 at 100k rows (Enquiries / All), lexical branch on GIN</dd>
         </div>
         <div class="hero-stat">
           <dt class="mono">0.80 / 0.70</dt>
@@ -348,8 +348,12 @@
               <td>About 500&ndash;840 ms sequential scan; 26&ndash;166 ms with hits prefilter (GIN index)</td>
             </tr>
             <tr>
-              <th scope="row">Query embedding, warm, 2 threads (dev container)</th>
-              <td>About 5.9 ms</td>
+              <th scope="row">Full hybrid query, SQL only, 100k template tickets (benchmark)</th>
+              <td>p50 127 ms All / 25 ms Enquiries; p95 407 / 56 ms</td>
+            </tr>
+            <tr>
+              <th scope="row">Query embedding, warm (benchmark)</th>
+              <td>p50 7.9 ms, p95 10.2 ms</td>
             </tr>
           </tbody>
         </table>

@@ -79,3 +79,27 @@ async def test_fastembed_initialization_is_lazy_and_threaded(monkeypatch):
         {"cache_dir": "/cached-model", "threads": 2},
     )
     assert all(math.hypot(*vector) == pytest.approx(1.0) for vector in vectors)
+
+
+async def test_fastembed_caches_recent_texts(monkeypatch):
+    calls = []
+
+    class FakeTextEmbedding:
+        def __init__(self, model_name, **kwargs):
+            pass
+
+        def embed(self, texts):
+            calls.extend(texts)
+            return [[float(len(t) + 1)] + [1.0] * 383 for t in texts]
+
+    monkeypatch.setattr("app.services.embeddings.TextEmbedding", FakeTextEmbedding)
+    monkeypatch.setattr("app.services.embeddings.CACHE_SIZE", 2)
+    embedder = FastEmbedder(Settings.model_construct(model_dir="/m", embed_threads=1))
+    first = await embedder.embed("one")
+    assert await embedder.embed("one") is first
+    await embedder.embed("three")
+    await embedder.embed("one")  # refreshes "one", so "three" is the oldest
+    await embedder.embed("fifth")
+    await embedder.embed("one")
+    await embedder.embed("three")
+    assert calls == ["one", "three", "fifth", "three"]

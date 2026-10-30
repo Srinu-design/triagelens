@@ -67,6 +67,8 @@ Timers exclude embedding, SET LOCAL, transaction setup and index isolation from 
 
 ### EXPLAIN (ANALYZE, BUFFERS): All
 
+<details><summary>Plan JSON</summary>
+
 ```json
 [
   {
@@ -1011,7 +1013,11 @@ Timers exclude embedding, SET LOCAL, transaction setup and index isolation from 
 ]
 ```
 
+</details>
+
 ### EXPLAIN (ANALYZE, BUFFERS): CLIENT_ENQUIRY
+
+<details><summary>Plan JSON</summary>
 
 ```json
 [
@@ -2008,6 +2014,8 @@ Timers exclude embedding, SET LOCAL, transaction setup and index isolation from 
   }
 ]
 ```
+
+</details>
 
 ## EC2 memory
 

@@ -1,11 +1,20 @@
 import re
 from typing import Any, Literal
 
+from fastapi import Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.errors import ApiError
 
 ERROR_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$")
+
+
+def require_json(request: Request) -> None:
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        raise ApiError(
+            422, "VALIDATION_ERROR", "Invalid Content-Type", "Content-Type must be application/json"
+        )
 
 
 class TriageSuggestion(BaseModel):

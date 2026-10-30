@@ -34,9 +34,11 @@ def create_engine(settings: Settings, *, null_pool: bool = False) -> AsyncEngine
 
 @asynccontextmanager
 async def read_transaction(engine: AsyncEngine):
-    async with engine.begin() as connection:
-        await connection.execute(text("SET TRANSACTION READ ONLY"))
-        yield connection
+    # asyncpg opens it with BEGIN READ ONLY: one round trip instead of BEGIN + SET TRANSACTION
+    async with engine.connect() as connection:
+        await connection.execution_options(postgresql_readonly=True)
+        async with connection.begin():
+            yield connection
 
 
 @asynccontextmanager

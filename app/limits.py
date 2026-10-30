@@ -24,26 +24,32 @@ LIMITS = {
 }
 
 
-async def check_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
-    settings = request.app.state.settings
-    if not settings.rate_limit_enabled:
-        return
-
-    redis = getattr(request.app.state, "redis", None)
-    if redis is None:
-        return
-
+async def _over_limit(request: Request, scope: str) -> int:
+    """Count this request in its fixed window; return seconds until the window resets when the
+    count is over the limit, else 0. Redis errors propagate so each caller picks its fail mode."""
+    limit, window_seconds = LIMITS[scope]
     # DECISION: Client IP is request.client.host; uvicorn --proxy-headers handles reverse proxies.
     ip = request.client.host if request.client else "127.0.0.1"
     now = int(time.time())
     window_start = (now // window_seconds) * window_seconds
     key = f"tl:rl:{scope}:{ip}:{window_start}"
-    window_ms = window_seconds * 1000
-    retry_after = max(1, (window_start + window_seconds) - now)
+    count = await request.app.state.redis.eval(RATE_LIMIT_LUA, 1, key, window_seconds * 1000)
+    return max(1, window_start + window_seconds - now) if count > limit else 0
 
-    try:
-        count = await redis.eval(RATE_LIMIT_LUA, 1, key, window_ms)
-        if count > limit:
+
+def rate_limit(scope: str):
+    """A route dependency enforcing the per-IP limit for scope."""
+
+    async def check(request: Request) -> None:
+        if not request.app.state.settings.rate_limit_enabled:
+            return
+        try:
+            retry_after = await _over_limit(request, scope)
+        except Exception as exc:
+            # DECISION: Fail open on Redis errors for per-IP rate limits (log error type only).
+            logger.warning("Redis rate limit check failed (%s)", type(exc).__name__)
+            return
+        if retry_after:
             raise ApiError(
                 status=429,
                 code="RATE_LIMITED",
@@ -51,12 +57,8 @@ async def check_rate_limit(request: Request, scope: str, limit: int, window_seco
                 detail=f"Rate limit exceeded for {scope}. Try again in {retry_after} seconds.",
                 headers={"Retry-After": str(retry_after)},
             )
-    except ApiError:
-        raise
-    except Exception as exc:
-        # DECISION: Fail open on Redis errors for per-IP rate limits (log error type only).
-        logger.warning("Redis rate limit check failed (%s)", type(exc).__name__)
-        return
+
+    return check
 
 
 async def check_llm_limit(request: Request) -> bool:
@@ -65,45 +67,9 @@ async def check_llm_limit(request: Request) -> bool:
         return False
     if not settings.rate_limit_enabled:
         return True
-
-    redis = getattr(request.app.state, "redis", None)
-    if redis is None:
-        logger.warning("LLM rate limit check failed (Redis is None)")
-        return False
-
-    ip = request.client.host if request.client else "127.0.0.1"
-    limit, window_seconds = LIMITS["llm"]
-    now = int(time.time())
-    window_start = (now // window_seconds) * window_seconds
-    key = f"tl:rl:llm:{ip}:{window_start}"
-    window_ms = window_seconds * 1000
-
     try:
-        count = await redis.eval(RATE_LIMIT_LUA, 1, key, window_ms)
-        if count > limit:
-            return False
-        return True
+        return not await _over_limit(request, "llm")
     except Exception as exc:
         # DECISION: LLM per-IP limit fails closed on Redis errors, same as daily budget.
         logger.warning("LLM rate limit check failed (%s)", type(exc).__name__)
         return False
-
-
-async def limit_search(request: Request) -> None:
-    limit, window = LIMITS["search"]
-    await check_rate_limit(request, "search", limit, window)
-
-
-async def limit_preview(request: Request) -> None:
-    limit, window = LIMITS["preview"]
-    await check_rate_limit(request, "preview", limit, window)
-
-
-async def limit_items(request: Request) -> None:
-    limit, window = LIMITS["commit"]
-    await check_rate_limit(request, "commit", limit, window)
-
-
-async def limit_ann_lab(request: Request) -> None:
-    limit, window = LIMITS["ann_lab"]
-    await check_rate_limit(request, "ann_lab", limit, window)

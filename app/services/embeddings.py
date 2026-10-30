@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import math
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -11,6 +12,9 @@ from app.config import Settings
 
 DIMENSIONS = 384
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
+# Recent single-text embeddings (~12 KB each). The demo repeats texts all the time (the default
+# search on every page load, presets, a preview then its commit), and the model is ~8 ms of CPU.
+CACHE_SIZE = 256
 
 
 class Embedder(Protocol):
@@ -37,16 +41,25 @@ class FastEmbedder:
         self._model = None
         self._load_lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(2)
+        self._cache: OrderedDict[str, list[float]] = OrderedDict()
 
     def _load_model(self):
         return TextEmbedding(
-            "BAAI/bge-small-en-v1.5",
+            MODEL_NAME,
             cache_dir=self.settings.model_dir,
             threads=self.settings.embed_threads,
         )
 
     async def embed(self, text: str) -> list[float]:
-        return (await self.embed_many([text]))[0]
+        # callers treat vectors as read-only, so a cached list is shared safely
+        if (vector := self._cache.get(text)) is not None:
+            self._cache.move_to_end(text)
+            return vector
+        vector = (await self.embed_many([text]))[0]
+        self._cache[text] = vector
+        if len(self._cache) > CACHE_SIZE:
+            self._cache.popitem(last=False)
+        return vector
 
     async def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:

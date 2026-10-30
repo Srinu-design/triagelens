@@ -27,7 +27,7 @@ services:
   triagelens-app:
     <<: *app
     restart: unless-stopped
-    mem_limit: 500m   # one worker with ONNX model: ~328 MB idle, ~330 MB after 10 previews measured; 500 MB headroom
+    mem_limit: 500m   # one worker with the ONNX model: 257 MiB idle, 271 MiB peak on the host (bench/RESULTS.md)
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
       interval: 5s
