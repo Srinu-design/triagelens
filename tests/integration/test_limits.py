@@ -28,11 +28,11 @@ async def clean_redis(settings):
 
     redis = Redis.from_url(settings.redis_url)
     try:
-        keys = await redis.keys("tl:rl:*")
+        keys = await redis.keys("tl:rl:*") + await redis.keys("tl:llm:*")
         if keys:
             await redis.delete(*keys)
         yield
-        keys = await redis.keys("tl:rl:*")
+        keys = await redis.keys("tl:rl:*") + await redis.keys("tl:llm:*")
         if keys:
             await redis.delete(*keys)
     finally:
