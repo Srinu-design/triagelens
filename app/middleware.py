@@ -116,6 +116,9 @@ class SecurityHeadersMiddleware:
                 names = {name for name, _ in SECURITY_HEADERS}
                 headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in names]
                 headers.extend(SECURITY_HEADERS)
+                # Revalidate pages and assets (cheap with the ETag) so a deploy shows at once.
+                if not any(k.lower() == b"cache-control" for k, _ in headers):
+                    headers.append((b"cache-control", b"no-cache"))
                 message["headers"] = headers
             await send(message)
 

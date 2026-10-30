@@ -12,6 +12,7 @@ EXPECTED_HEADERS = {
     "x-frame-options": "DENY",
     "permissions-policy": "camera=(), microphone=(), geolocation=()",
     "cross-origin-opener-policy": "same-origin",
+    "cache-control": "no-cache",
 }
 
 
