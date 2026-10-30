@@ -1,0 +1,40 @@
+# TriageLens on the portfolio-apps host (deploy/deploy.sh drives it).
+#   TRIAGELENS_IMAGE=triagelens:<sha> docker compose -p triagelens -f deploy/compose.prod.yaml --env-file /opt/triagelens/.env up -d
+# Joins the shared "portfolio" network (deploy/portfolio/compose.yaml) to reach its Postgres
+# (database "triagelens", own role) and Redis. Nothing is published: Caddy routes /triagelens/* here.
+name: triagelens
+
+x-app: &app
+  image: ${TRIAGELENS_IMAGE:?set TRIAGELENS_IMAGE to the release image}
+  env_file: ${TRIAGELENS_ROOT:-/opt/triagelens}/.env
+  init: true
+  networks: [portfolio]
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+services:
+  triagelens-migrate:
+    <<: *app
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+
+  triagelens-seed:
+    <<: *app
+    restart: "no"
+    command: ["python", "-m", "app.seed_load", "--if-empty"]
+
+  triagelens-app:
+    <<: *app
+    restart: unless-stopped
+    mem_limit: 500m   # one worker with ONNX model: ~328 MB idle, ~330 MB after 10 previews measured; 500 MB headroom
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+networks:
+  portfolio:
+    name: portfolio
+    external: true
