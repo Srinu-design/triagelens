@@ -9,7 +9,7 @@ from time import perf_counter
 from uuid import UUID
 
 from pgvector.sqlalchemy import HALFVEC
-from sqlalchemy import Text, bindparam, text
+from sqlalchemy import BigInteger, Text, bindparam, text
 from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.config import Settings
@@ -38,22 +38,32 @@ async def timed_ids(connection, statement, parameters):
     return rows, (perf_counter() - started) * 1000
 
 
-def nearest_sql(column: str, *, filtered: bool = False):
+def nearest_sql(column: str, *, filtered: bool = False, with_distances: bool = False):
     if column not in {"emb_f32", "emb_f16"}:
         raise ValueError("Invalid embedding column")
     where = " WHERE category = 'CLIENT_ENQUIRY'" if filtered else ""
-    return text(f"SELECT id FROM bench_items{where} ORDER BY {column} <=> :qvec LIMIT 10")
+    columns = f"id, {column} <=> :qvec AS distance" if with_distances else "id"
+    return text(f"SELECT {columns} FROM bench_items{where} ORDER BY {column} <=> :qvec LIMIT 10")
 
 
 async def ground_truth(engine, vectors, *, filtered=False):
     async with read_transaction(engine) as connection:
         await connection.execute(text("SET LOCAL enable_indexscan = off"))
         await connection.execute(text("SET LOCAL enable_bitmapscan = off"))
-        statement = nearest_sql("emb_f32", filtered=filtered)
-        return [
-            list((await connection.execute(statement, {"qvec": vector})).scalars())
-            for vector in vectors
-        ]
+        statement = nearest_sql("emb_f32", filtered=filtered, with_distances=True)
+        truth = []
+        for vector in vectors:
+            rows = (await connection.execute(statement, {"qvec": vector})).all()
+            if len(rows) != 10:
+                raise ValueError("Recall@10 requires at least ten eligible benchmark rows")
+            truth.append(
+                {
+                    "ids": [row.id for row in rows],
+                    "distances": [float(row.distance) for row in rows],
+                    "d10": float(rows[9].distance),
+                }
+            )
+        return truth
 
 
 async def ann_trial(
@@ -82,10 +92,16 @@ async def ann_trial(
             for i in range(WARMUPS):
                 await connection.execute(statement, {"qvec": vectors[i % len(vectors)]})
             times, scores, counts = [], [], []
+            distances = text(
+                "SELECT emb_f32 <=> :qvec FROM bench_items WHERE id = ANY(:ids)"
+            ).bindparams(bindparam("ids", type_=ARRAY(BigInteger())))
             for vector, expected in zip(vectors, truth, strict=True):
                 actual, elapsed = await timed_ids(connection, statement, {"qvec": vector})
                 times.append(elapsed)
-                scores.append(recall_at_10(actual, expected))
+                exact_distances = list(
+                    (await connection.execute(distances, {"qvec": vector, "ids": actual})).scalars()
+                )
+                scores.append(recall_at_10(exact_distances, expected["d10"]))
                 counts.append(len(actual))
             return {
                 "recall": sum(scores) / len(scores),
@@ -251,6 +267,9 @@ async def run(queries_count: int, seed: int):
             ]
         async with read_transaction(app_engine) as connection:
             app_n = await connection.scalar(text("SELECT count(*) FROM intake_items"))
+            distinct_texts = await connection.scalar(
+                text("SELECT count(DISTINCT (title, description)) FROM intake_items")
+            )
             owned = await connection.scalar(
                 text("SELECT count(*) FROM intake_items WHERE owner_session = :sid"), {"sid": SID}
             )
@@ -327,6 +346,10 @@ async def run(queries_count: int, seed: int):
             "Tickets are template-generated (`generate.py --seed 42`, queries `run.py --seed 7`). "
             "Recall and latency may not transfer to real ticket text.",
             "",
+            # DECISION: Count tied neighbors by exact f32 distance, independent of returned IDs.
+            f"Distinct ticket texts: {distinct_texts}. Recall@10 is distance-based because of ties "
+            "(exact emb_f32 distance <= d10 + 1e-6); distance lookups are untimed.",
+            "",
             "## Machine",
             "",
             *[f"- {key}: {value}" for key, value in machine_info().items()],
@@ -348,8 +371,7 @@ async def run(queries_count: int, seed: int):
             "from SQL latency. Ground truth disables index/bitmap scans on emb_f32. "
             "Partial-index recall uses exact filtered truth. "
             "All query tickets are evaluated under the enquiry filter. "
-            "Duplicate template vectors can tie; "
-            "recall measures returned IDs, including tie effects.",
+            "Recall accepts every returned row within the exact tenth-neighbor distance tolerance.",
             "",
             "## Build",
             "",

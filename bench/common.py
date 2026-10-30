@@ -80,8 +80,8 @@ def build_tickets(rows: int, seed: int, *, queries: bool = False) -> list[Ticket
     return tickets
 
 
-def recall_at_10(actual, expected) -> float:
-    return len(set(actual[:10]) & set(expected[:10])) / 10
+def recall_at_10(actual_distances, d10: float) -> float:
+    return sum(distance <= d10 + 1e-6 for distance in actual_distances[:10]) / 10
 
 
 def percentile(values, p: float) -> float:

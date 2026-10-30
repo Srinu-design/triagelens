@@ -37,16 +37,24 @@ def test_queries_have_codes_across_categories():
 
 
 @pytest.mark.parametrize(
-    "actual, expected, score",
+    "distances, d10, score",
     [
-        (list(range(10)), list(range(10)), 1.0),
-        (list(range(8, 18)), list(range(10)), 0.2),
-        ([], list(range(10)), 0.0),
-        ([0] * 10, list(range(10)), 0.1),
+        ([0.1] * 10, 0.1, 1.0),
+        ([0.1, 0.2] + [0.3] * 8, 0.2, 0.2),
+        ([], 0.2, 0.0),
+        ([0.2, 0.2 + 0.5e-6, 0.2 + 2e-6], 0.2, 0.2),
+        ([0.1] * 11, 0.1, 1.0),
     ],
 )
-def test_recall(actual, expected, score):
-    assert recall_at_10(actual, expected) == score
+def test_recall(distances, d10, score):
+    assert recall_at_10(distances, d10) == score
+
+
+def test_recall_accepts_different_ids_tied_at_tenth_distance():
+    exact = [(item_id, 0.1) for item_id in range(1, 10)] + [(10, 0.2)]
+    actual = [(101, 0.2), (102, 0.2)]
+    assert not {item_id for item_id, _ in exact} & {item_id for item_id, _ in actual}
+    assert recall_at_10([distance for _, distance in actual], exact[-1][1]) == 0.2
 
 
 @pytest.mark.parametrize("p, expected", [(0, 1), (50, 2.5), (95, 3.85), (100, 4)])

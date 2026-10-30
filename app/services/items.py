@@ -217,6 +217,42 @@ async def commit_item(
         severity = classified["severity"]
         subsystem = classified["subsystem"]
 
+        # DECISION: Keep the insert local so all actions reuse the same validated, scrubbed fields.
+        async def insert_item(
+            *,
+            item_id: int,
+            ticket_code: str,
+            status: str,
+            duplicate_of: int | None = None,
+            resolution_note: str | None = None,
+        ) -> None:
+            await conn.execute(
+                text(
+                    "INSERT INTO intake_items (id, ticket_code, category, title, description, "
+                    "error_code, severity, subsystem, status, duplicate_of, base_count, "
+                    "resolution_note, owner_session, embedding_model, embedding) VALUES (:id, "
+                    ":ticket_code, :category, :title, :description, :error_code, :severity, "
+                    ":subsystem, :status, :duplicate_of, 0, :resolution_note, :owner_session, "
+                    ":embedding_model, :embedding)"
+                ).bindparams(bindparam("embedding", type_=HALFVEC(384))),
+                {
+                    "id": item_id,
+                    "ticket_code": ticket_code,
+                    "category": item.category,
+                    "title": scrubbed_title,
+                    "description": scrubbed_desc,
+                    "error_code": item.error_code,
+                    "severity": severity,
+                    "subsystem": subsystem,
+                    "status": status,
+                    "duplicate_of": duplicate_of,
+                    "resolution_note": resolution_note,
+                    "owner_session": session_id,
+                    "embedding_model": embedder.model_name,
+                    "embedding": embedding,
+                },
+            )
+
         response_data: dict[str, Any]
         if item.action == "NEW":
             next_id = await conn.scalar(
@@ -230,28 +266,10 @@ async def commit_item(
                 else "ENQ-U"
             )
             ticket_code = f"{prefix}{next_id}"
-            await conn.execute(
-                text(
-                    "INSERT INTO intake_items (id, ticket_code, category, title, description, "
-                    "error_code, severity, subsystem, status, duplicate_of, base_count, "
-                    "resolution_note, owner_session, embedding_model, embedding) VALUES (:id, "
-                    ":ticket_code, :category, :title, :description, :error_code, :severity, "
-                    ":subsystem, 'OPEN', NULL, 0, NULL, :owner_session, :embedding_model, "
-                    ":embedding)"
-                ).bindparams(bindparam("embedding", type_=HALFVEC(384))),
-                {
-                    "id": next_id,
-                    "ticket_code": ticket_code,
-                    "category": item.category,
-                    "title": scrubbed_title,
-                    "description": scrubbed_desc,
-                    "error_code": item.error_code,
-                    "severity": severity,
-                    "subsystem": subsystem,
-                    "owner_session": session_id,
-                    "embedding_model": embedder.model_name,
-                    "embedding": embedding,
-                },
+            await insert_item(
+                item_id=next_id,
+                ticket_code=ticket_code,
+                status="OPEN",
             )
             response_data = {"action": "NEW", "ticket_code": ticket_code, "status": "OPEN"}
 
@@ -261,29 +279,11 @@ async def commit_item(
                 text("SELECT nextval(pg_get_serial_sequence('intake_items', 'id'))")
             )
             ticket_code = f"BUG-U{next_id}"
-            await conn.execute(
-                text(
-                    "INSERT INTO intake_items (id, ticket_code, category, title, description, "
-                    "error_code, severity, subsystem, status, duplicate_of, base_count, "
-                    "resolution_note, owner_session, embedding_model, embedding) VALUES (:id, "
-                    ":ticket_code, :category, :title, :description, :error_code, :severity, "
-                    ":subsystem, 'DUPLICATE', :master_id, 0, NULL, :owner_session, "
-                    ":embedding_model, :embedding)"
-                ).bindparams(bindparam("embedding", type_=HALFVEC(384))),
-                {
-                    "id": next_id,
-                    "ticket_code": ticket_code,
-                    "category": item.category,
-                    "title": scrubbed_title,
-                    "description": scrubbed_desc,
-                    "error_code": item.error_code,
-                    "severity": severity,
-                    "subsystem": subsystem,
-                    "master_id": master["id"],
-                    "owner_session": session_id,
-                    "embedding_model": embedder.model_name,
-                    "embedding": embedding,
-                },
+            await insert_item(
+                item_id=next_id,
+                ticket_code=ticket_code,
+                status="DUPLICATE",
+                duplicate_of=master["id"],
             )
             count_shown = await compute_count_shown(
                 conn, master["id"], master["category"], master["base_count"], session_id
@@ -321,30 +321,12 @@ async def commit_item(
                 text("SELECT nextval(pg_get_serial_sequence('intake_items', 'id'))")
             )
             ticket_code = f"ENQ-U{next_id}"
-            await conn.execute(
-                text(
-                    "INSERT INTO intake_items (id, ticket_code, category, title, description, "
-                    "error_code, severity, subsystem, status, duplicate_of, base_count, "
-                    "resolution_note, owner_session, embedding_model, embedding) VALUES (:id, "
-                    ":ticket_code, :category, :title, :description, :error_code, :severity, "
-                    ":subsystem, 'RESOLVED_AUTO', :master_id, 0, :resolution_note, "
-                    ":owner_session, :embedding_model, :embedding)"
-                ).bindparams(bindparam("embedding", type_=HALFVEC(384))),
-                {
-                    "id": next_id,
-                    "ticket_code": ticket_code,
-                    "category": item.category,
-                    "title": scrubbed_title,
-                    "description": scrubbed_desc,
-                    "error_code": item.error_code,
-                    "severity": severity,
-                    "subsystem": subsystem,
-                    "master_id": master["id"],
-                    "resolution_note": master["resolution_note"],
-                    "owner_session": session_id,
-                    "embedding_model": embedder.model_name,
-                    "embedding": embedding,
-                },
+            await insert_item(
+                item_id=next_id,
+                ticket_code=ticket_code,
+                status="RESOLVED_AUTO",
+                duplicate_of=master["id"],
+                resolution_note=master["resolution_note"],
             )
             response_data = {
                 "action": "ANSWER",
