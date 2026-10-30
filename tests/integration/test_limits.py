@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -13,6 +14,12 @@ def rl_app(settings, embedder, monkeypatch):
     monkeypatch.setattr("app.main.make_embedder", lambda settings: embedder)
     configured = settings.model_copy(update={"rate_limit_enabled": True})
     return create_app(configured)
+
+
+@pytest.fixture(autouse=True)
+def frozen_window(monkeypatch):
+    # a test that straddles a fixed-window boundary would see its counter reset
+    monkeypatch.setattr("app.limits.time", SimpleNamespace(time=lambda: 1_800_000_030))
 
 
 @pytest.fixture(autouse=True)

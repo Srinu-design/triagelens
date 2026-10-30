@@ -37,10 +37,7 @@ async def preview(app_state, sid: UUID, body: PreviewIn, *, allow_llm: bool = Tr
     explicit_codes = [body.error_code] if body.error_code else []
     codes = list(dict.fromkeys(explicit_codes + extract_codes(query)))[:5]
 
-    try:
-        suggestion, source = await app_state.llm.suggest(title, description, allow_llm=allow_llm)
-    except TypeError:
-        suggestion, source = await app_state.llm.suggest(title, description)
+    suggestion, source = await app_state.llm.suggest(title, description, allow_llm=allow_llm)
     category = body.category_override or suggestion.category
     started = perf_counter()
     qvec = await app_state.embedder.embed(query)

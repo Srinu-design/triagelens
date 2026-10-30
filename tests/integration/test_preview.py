@@ -216,9 +216,9 @@ async def test_scrubbed_inputs_one_embed_and_safe_logs(client, application, embe
     classifier_inputs, embedding_inputs = [], []
 
     class RecordingClassifier:
-        async def suggest(self, title, description):
+        async def suggest(self, title, description, *, allow_llm=True):
             classifier_inputs.append((title, description))
-            return await classifier.suggest(title, description)
+            return await classifier.suggest(title, description, allow_llm=allow_llm)
 
     class RecordingEmbedder:
         async def embed(self, value):
