@@ -26,7 +26,7 @@ CANDIDATE_FIELDS = (
 )
 
 
-async def preview(app_state, sid: UUID, body: PreviewIn) -> dict:
+async def preview(app_state, sid: UUID, body: PreviewIn, *, allow_llm: bool = True) -> dict:
     title, title_counts = scrub(body.title)
     description, description_counts = scrub(body.description)
     counts = dict(Counter(title_counts) + Counter(description_counts))
@@ -37,7 +37,10 @@ async def preview(app_state, sid: UUID, body: PreviewIn) -> dict:
     explicit_codes = [body.error_code] if body.error_code else []
     codes = list(dict.fromkeys(explicit_codes + extract_codes(query)))[:5]
 
-    suggestion, source = await app_state.llm.suggest(title, description)
+    try:
+        suggestion, source = await app_state.llm.suggest(title, description, allow_llm=allow_llm)
+    except TypeError:
+        suggestion, source = await app_state.llm.suggest(title, description)
     category = body.category_override or suggestion.category
     started = perf_counter()
     qvec = await app_state.embedder.embed(query)
@@ -73,16 +76,20 @@ async def preview(app_state, sid: UUID, body: PreviewIn) -> dict:
     for row in displayed:
         row["cosine"] = round(float(row["cosine"]), 4)
 
-    logger.info(
-        "preview",
-        extra={
-            "title_length": len(title),
-            "description_length": len(description),
-            "redaction_total": total,
-            "verdict": decision["verdict"],
-            "classifier_source": source,
-        },
-    )
+    # DECISION: In production, request logs are handled exclusively by RequestLogMiddleware.
+    # We retain this info log only when explicitly enabled (e.g. test_preview caplog).
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "preview",
+            extra={
+                "title_length": len(title),
+                "description_length": len(description),
+                "redaction_total": total,
+                "verdict": decision["verdict"],
+                "classifier_source": source,
+            },
+        )
+
     return {
         "scrubbed": {"title": title, "description": description, "counts": counts, "total": total},
         "suggestion": suggestion.model_dump() | {"source": source},

@@ -354,3 +354,30 @@ async def test_llm_prompt_injection_stays_inside_ticket_tags() -> None:
     assert content.endswith("</ticket>")
     ticket_payload = content[len("<ticket>") : -len("</ticket>")].strip()
     assert injection in ticket_payload
+
+
+@pytest.mark.asyncio
+async def test_llm_allow_llm_false_zero_http_calls_zero_budget() -> None:
+    http_calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        http_calls.append(request)
+        return httpx.Response(200, json=_make_llm_choice())
+
+    redis = FakeRedis()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    classifier = LLMClassifier(
+        base_url="https://llm.example.com",
+        api_key="sk-test-key",
+        model="gpt-test",
+        redis=redis,
+        http=client,
+    )
+
+    sugg, source = await classifier.suggest(
+        "Pricing question", "How much does a yearly plan cost?", allow_llm=False
+    )
+    assert source == "rules"
+    assert sugg.category == "CLIENT_ENQUIRY"
+    assert len(http_calls) == 0
+    assert redis.incr_calls == 0
