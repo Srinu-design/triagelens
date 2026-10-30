@@ -2010,3 +2010,20 @@ Timers exclude embedding, SET LOCAL, transaction setup and index isolation from 
 ```
 
 ## EC2 memory
+
+Measured 2026-10-30 on `portfolio-apps` (t3.small: 2 vCPU, 1.9 GiB RAM + 2 GiB swap, Ubuntu 24.04), with SplitSync and TriageLens both running and the LLM path off (no `LLM_*` settings). Load: three bursts of 10 concurrent `POST /api/triage/preview` (demo step 5) through Caddy, one minute apart. `docker stats --no-stream`, sampled at idle, during each burst and after.
+
+| Service | mem_limit | Idle | Peak |
+| --- | --- | --- | --- |
+| triagelens-app (1 worker, `EMBED_THREADS=1`) | 500 MiB | 256.6 MiB | 271.0 MiB |
+| splitsync-app (2 workers) | 400 MiB | 157.4 MiB | 157.9 MiB |
+| postgres (pgvector 0.8.7-pg16) | 512 MiB | 59.7 MiB | 72.4 MiB |
+| redis | 96 MiB | 6.4 MiB | 6.7 MiB |
+| caddy | none | 19.6 MiB | 20.3 MiB |
+
+| | Idle | Bursts | After |
+| --- | --- | --- | --- |
+| Host memory used / available | 1027 / 878 MiB | 1008–1027 / 878–897 MiB | 1030 / 875 MiB |
+| Swap used | 0 MiB | 0 MiB | 0 MiB |
+
+All 30 previews returned 200; each burst of 10 finished in 0.55–0.76 s on average (max 0.84 s), since one worker embeds them one after another. The limits stay as set: TriageLens peaks at 54% of its 500 MiB, and swap was never touched.
